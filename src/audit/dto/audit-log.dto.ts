@@ -6,6 +6,7 @@ import {
   Min,
   Max,
   IsEnum,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -50,6 +51,38 @@ export class GetAuditLogsDto {
   @Min(1)
   @Max(100)
   limit?: number = 50;
+}
+
+export class ExportAuditLogsDto {
+  @ApiPropertyOptional({ description: 'Filter by user ID' })
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by action type' })
+  @IsOptional()
+  @IsString()
+  actionType?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by result status' })
+  @IsOptional()
+  @IsEnum(['SUCCESS', 'FAILURE', 'ERROR'])
+  result?: string;
+
+  @ApiPropertyOptional({ description: 'Start date for filtering' })
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @ApiPropertyOptional({ description: 'End date for filtering' })
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+
+  @ApiPropertyOptional({ description: 'Export format', default: 'csv' })
+  @IsOptional()
+  @IsIn(['csv', 'json'])
+  format?: string = 'csv';
 }
 
 export class AuditLogResponseDto {

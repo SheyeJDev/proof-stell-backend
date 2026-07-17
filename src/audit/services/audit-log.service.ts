@@ -176,4 +176,89 @@ export class AuditLogService {
       recentActivity,
     };
   }
+
+  async exportLogs(
+    filters: AuditLogFilters,
+    format: 'csv' | 'json',
+  ): Promise<{
+    filename: string;
+    data: string;
+    mimeType: string;
+  }> {
+    const { logs } = await this.findLogs({ ...filters, limit: 10000 });
+
+    const timestamp = new Date().toISOString().split('T')[0];
+
+    if (format === 'json') {
+      return {
+        filename: `audit_logs_export_${timestamp}.json`,
+        data: JSON.stringify(logs, null, 2),
+        mimeType: 'application/json',
+      };
+    }
+
+    // CSV format
+    if (logs.length === 0) {
+      return {
+        filename: `audit_logs_export_${timestamp}.csv`,
+        data: '',
+        mimeType: 'text/csv',
+      };
+    }
+
+    const headers = [
+      'id',
+      'userId',
+      'actionType',
+      'resource',
+      'result',
+      'ipAddress',
+      'createdAt',
+      'metadata',
+    ];
+
+    const rows = logs.map((log) => [
+      log.id,
+      log.userId,
+      log.actionType,
+      log.resource || '',
+      log.result || '',
+      log.ipAddress || '',
+      log.createdAt.toISOString(),
+      JSON.stringify(log.metadata || {}).replace(/"/g, '""'),
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row) =>
+        row
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(','),
+      ),
+    ].join('\n');
+
+    return {
+      filename: `audit_logs_export_${timestamp}.csv`,
+      data: csvContent,
+      mimeType: 'text/csv',
+    };
+  }
+
+  async archiveOldLogs(retentionDays: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+    const result = await this.auditLogRepository
+      .createQueryBuilder()
+      .delete()
+      .where('createdAt < :cutoffDate', { cutoffDate })
+      .execute();
+
+    const deletedCount = result.affected || 0;
+    this.logger.log(
+      `Archived ${deletedCount} audit logs older than ${retentionDays} days`,
+    );
+
+    return deletedCount;
+  }
 }

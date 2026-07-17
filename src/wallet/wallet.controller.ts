@@ -21,8 +21,11 @@ import type {
 } from './interfaces/wallet.interface';
 import { WalletErrorInterceptor } from './interceptors/wallet-error.interceptor';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { AuditLog } from '../audit/decorators/audit-log.decorator';
+import { AuditLogInterceptor } from '../audit/interceptors/audit-log.interceptor';
+import { AUDIT_ACTIONS } from '../audit/constants/audit-actions';
 
-@UseInterceptors(WalletErrorInterceptor)
+@UseInterceptors(WalletErrorInterceptor, AuditLogInterceptor)
 @UseGuards(AuthGuard)
 @Controller('wallet')
 export class WalletController {
@@ -91,6 +94,11 @@ export class WalletController {
   }
 
   @Post('send-transaction')
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.TOKEN_TRANSFER,
+    resource: 'blockchain:transfer',
+    includeBody: true,
+  })
   async sendTransaction(
     @Body() body: SendTransactionDto,
     @Request() req: { user: { userId: string } },
