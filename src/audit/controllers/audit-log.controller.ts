@@ -2,9 +2,11 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   HttpStatus,
   HttpCode,
   UseGuards,
+  Post,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,6 +19,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import {
   type GetAuditLogsDto,
+  type ExportAuditLogsDto,
   AuditLogsResponseDto,
   AuditLogResponseDto,
   AuditLogStatsDto,
@@ -109,5 +112,41 @@ export class AuditLogController {
     limit = 100,
   ): Promise<AuditLogResponseDto[]> {
     return this.auditLogService.getLogsByActionType(actionType, limit);
+  }
+
+  @Post('export')
+  @ApiOperation({ summary: 'Export audit logs with filtering' })
+  @ApiResponse({
+    status: 200,
+    description: 'Audit logs exported successfully',
+  })
+  @HttpCode(HttpStatus.OK)
+  async exportAuditLogs(@Query() query: ExportAuditLogsDto) {
+    const filters = {
+      ...query,
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    };
+
+    return this.auditLogService.exportLogs(filters, query.format as 'csv' | 'json');
+  }
+
+  @Post('archive')
+  @ApiOperation({ summary: 'Archive old audit logs' })
+  @ApiResponse({
+    status: 200,
+    description: 'Audit logs archived successfully',
+  })
+  @HttpCode(HttpStatus.OK)
+  async archiveAuditLogs(@Query('days') days: string = '365') {
+    const retentionDays = parseInt(days, 10);
+    if (isNaN(retentionDays) || retentionDays < 30) {
+      throw new Error('Retention days must be at least 30');
+    }
+    const deletedCount = await this.auditLogService.archiveOldLogs(retentionDays);
+    return {
+      message: `Archived ${deletedCount} audit logs older than ${retentionDays} days`,
+      deletedCount,
+    };
   }
 }

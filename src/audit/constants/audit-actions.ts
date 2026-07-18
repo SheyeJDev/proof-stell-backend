@@ -43,6 +43,15 @@ export const AUDIT_ACTIONS = {
   PAYMENT_REFUNDED: 'PAYMENT_REFUNDED',
   PAYMENT_CANCELLED: 'PAYMENT_CANCELLED',
 
+  // Blockchain Operations (CRITICAL)
+  TOKEN_MINT: 'TOKEN_MINT',
+  TOKEN_TRANSFER: 'TOKEN_TRANSFER',
+  TOKEN_BURN: 'TOKEN_BURN',
+  BALANCE_QUERY: 'BALANCE_QUERY',
+  TRANSACTION_STATUS: 'TRANSACTION_STATUS',
+  BLOCKCHAIN_HEALTH: 'BLOCKCHAIN_HEALTH',
+  BLOCKCHAIN_TX_FAILED: 'BLOCKCHAIN_TX_FAILED',
+
   // System Operations
   SYSTEM_CONFIG_CHANGED: 'SYSTEM_CONFIG_CHANGED',
   BACKUP_CREATED: 'BACKUP_CREATED',
@@ -66,6 +75,13 @@ export const AUDIT_ACTIONS = {
   ADMIN_BADGE_REMOVED: 'ADMIN_BADGE_REMOVED',
   ADMIN_BADGE_DEFAULTS_INITIALIZED: 'ADMIN_BADGE_DEFAULTS_INITIALIZED',
   ADMIN_DAILY_CHALLENGE_RESET: 'ADMIN_DAILY_CHALLENGE_RESET',
+
+  // Game Session Operations
+  SESSION_STARTED: 'SESSION_STARTED',
+  SESSION_REPORTED: 'SESSION_REPORTED',
+  SESSION_VERIFIED: 'SESSION_VERIFIED',
+  SESSION_ANALYTICS_VIEW: 'SESSION_ANALYTICS_VIEW',
+  SESSION_DATA_EXPORT: 'SESSION_DATA_EXPORT',
 } as const;
 
 // SIgnificant changes have been made to the `AUDIT_ACTIONS` constant, which now includes a comprehensive list of audit action types categorized under various sections such as Authentication, User Management, Role Management, Data Operations, Claims Management, Policy Management, Payment Operations, System Operations, and Security Events. Each action type is represented as a string constant.

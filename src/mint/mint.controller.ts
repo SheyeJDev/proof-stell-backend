@@ -7,16 +7,29 @@ import {
   Param,
   Delete,
   Req,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { MintService } from './mint.service';
 import { MintResponseDto } from './dto/create-mint.dto';
 import { UpdateMintDto } from './dto/update-mint.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { AuditLog } from 'src/audit/decorators/audit-log.decorator';
+import { AuditLogInterceptor } from 'src/audit/interceptors/audit-log.interceptor';
+import { AUDIT_ACTIONS } from 'src/audit/constants/audit-actions';
 
 @Controller('mint')
+@UseGuards(JwtAuthGuard)
+@UseInterceptors(AuditLogInterceptor)
 export class MintController {
   constructor(private readonly mintService: MintService) {}
 
   @Post('mint')
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.TOKEN_MINT,
+    resource: 'blockchain:mint',
+    includeBody: true,
+  })
   public async mint(@Req() req): Promise<MintResponseDto> {
     const mint = await this.mintService.mint(req.user.id);
     const explorerUrl = `https://voyager.online/tx/${mint.transactionHash}`;

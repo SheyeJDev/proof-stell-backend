@@ -25,6 +25,8 @@ export interface AuditLogMetadata {
   resource?: string;
   includeBody?: boolean;
   includeParams?: boolean;
+  includeBeforeAfter?: boolean;
+  includeExternalRequests?: boolean;
 }
 
 @Injectable()
@@ -47,7 +49,7 @@ export class AuditLogInterceptor implements NestInterceptor {
     }
 
     const request = context.switchToHttp().getRequest<Request>();
-    const user = request.user as { id?: string } | undefined;
+    const user = request.user as { id?: string; role?: string; permissions?: string[] } | undefined;
 
     if (!user?.id) {
       // Without identity we have nothing to attribute the action to.
@@ -59,6 +61,8 @@ export class AuditLogInterceptor implements NestInterceptor {
 
     const startTime = Date.now();
     const userId = user.id;
+    const userRole = user.role;
+    const userPermissions = user.permissions;
 
     return next.handle().pipe(
       tap((response) => {
@@ -72,6 +76,9 @@ export class AuditLogInterceptor implements NestInterceptor {
           'SUCCESS',
           response,
           Date.now() - startTime,
+          undefined,
+          userRole,
+          userPermissions,
         );
       }),
       catchError((error: unknown) => {
@@ -89,6 +96,8 @@ export class AuditLogInterceptor implements NestInterceptor {
             undefined,
             Date.now() - startTime,
             err.message,
+            userRole,
+            userPermissions,
           ),
         ).pipe(
           timeout({
@@ -118,6 +127,8 @@ export class AuditLogInterceptor implements NestInterceptor {
     responseData: unknown,
     duration: number,
     errorMessage?: string,
+    userRole?: string,
+    userPermissions?: string[],
   ): Promise<void> {
     try {
       const logMetadata: Record<string, unknown> = {
@@ -126,6 +137,14 @@ export class AuditLogInterceptor implements NestInterceptor {
         duration,
         result,
       };
+
+      if (userRole) {
+        logMetadata.userRole = userRole;
+      }
+
+      if (userPermissions) {
+        logMetadata.userPermissions = userPermissions;
+      }
 
       if (metadata.includeParams && request.params) {
         logMetadata.params = request.params;

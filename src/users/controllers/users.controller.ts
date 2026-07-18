@@ -36,11 +36,15 @@ import { CacheInterceptor } from '../../cache/interceptors/cache.interceptor';
 import { Cacheable, CacheKeys } from '../../cache/decorators/cache.decorator';
 import { AvatarService } from '../avatar/avatar.service';
 import { AvatarUploadInterceptor } from '../avatar/avatar-upload.interceptor';
+import { AuditLog } from '../../audit/decorators/audit-log.decorator';
+import { AuditLogInterceptor } from '../../audit/interceptors/audit-log.interceptor';
+import { AUDIT_ACTIONS } from '../../audit/constants/audit-actions';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(AuditLogInterceptor)
 export class UserController {
   constructor(
     private readonly userService: UserService,
@@ -60,6 +64,11 @@ export class UserController {
   })
   @Post()
   @Roles(Role.ADMIN)
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.USER_CREATED,
+    resource: 'user',
+    includeBody: true,
+  })
   async create(@Body() createUserDto: CreateUserDto): Promise<ReadUserDto> {
     return this.userService.create(createUserDto);
   }
@@ -126,6 +135,11 @@ export class UserController {
     type: ReadUserDto,
   })
   @Patch('profile')
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.USER_PROFILE_UPDATED,
+    resource: 'user:profile',
+    includeBody: true,
+  })
   async updateProfile(
     @Request() req,
     @Body() updateUserDto: UpdateUserDto,
@@ -151,6 +165,12 @@ export class UserController {
   })
   @Patch(':id')
   @Roles(Role.ADMIN)
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.USER_UPDATED,
+    resource: 'user',
+    includeBody: true,
+    includeParams: true,
+  })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateUserDto: UpdateUserDto,
@@ -169,6 +189,10 @@ export class UserController {
     description: 'Invalid current password',
   })
   @Patch('profile/change-password')
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.PASSWORD_CHANGE,
+    resource: 'user:password',
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   async changePassword(
     @Request() req,
@@ -197,6 +221,11 @@ export class UserController {
   })
   @Delete(':id')
   @Roles(Role.ADMIN)
+  @AuditLog({
+    actionType: AUDIT_ACTIONS.USER_DELETED,
+    resource: 'user',
+    includeParams: true,
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.userService.remove(id);
