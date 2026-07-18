@@ -16,8 +16,38 @@ import { RealtimeGateway } from '../common/gateways/realtime.gateway';
 import { CacheService } from '../cache/cache.service';
 import { CacheKeys } from '../cache/decorators/cache.decorator';
 
+/**
+ * Service for managing leaderboard rankings and score submissions.
+ * 
+ * This service handles score submissions, rank calculations, and leaderboard queries.
+ * It uses database transactions for consistency, cache invalidation for performance,
+ * and real-time updates via WebSocket for live leaderboard updates.
+ * 
+ * @example
+ * ```typescript
+ * const leaderboardService = new LeaderboardService(
+ *   leaderboardRepository,
+ *   dataSource,
+ *   configService,
+ *   notificationService,
+ *   realtimeGateway,
+ *   cacheService
+ * );
+ * const entry = await leaderboardService.submitScore('user-id', { score: 100 });
+ * ```
+ */
 @Injectable()
 export class LeaderboardService {
+  /**
+   * Creates a new LeaderboardService instance.
+   * 
+   * @param leaderboardRepository - TypeORM repository for Leaderboard entity
+   * @param dataSource - TypeORM data source for transaction management
+   * @param configService - Service for configuration values
+   * @param notificationService - Service for sending notifications
+   * @param realtimeGateway - Service for real-time WebSocket updates
+   * @param cacheService - Service for caching operations
+   */
   constructor(
     @InjectRepository(Leaderboard)
     private readonly leaderboardRepository: Repository<Leaderboard>,
@@ -28,6 +58,24 @@ export class LeaderboardService {
     private readonly cacheService: CacheService,
   ) {}
 
+  /**
+   * Submits a score to the leaderboard.
+   * 
+   * This method handles score submission with transaction safety, rank recalculation,
+   * cache invalidation, and real-time updates. It ensures that only higher scores
+   * are accepted and triggers notifications for rank changes.
+   * 
+   * @param userId - The ID of the user submitting the score
+   * @param createLeaderboardDto - Object containing the score to submit
+   * @returns Promise containing the updated leaderboard entry
+   * @throws {BadRequestException} If new score is not higher than current score
+   * 
+   * @example
+   * ```typescript
+   * const entry = await leaderboardService.submitScore('user-id', { score: 1500 });
+   * console.log(`New rank: ${entry.rank}`);
+   * ```
+   */
   async submitScore(
     userId: string,
     createLeaderboardDto: CreateLeaderboardDto,
@@ -122,6 +170,22 @@ export class LeaderboardService {
     return finalEntry;
   }
 
+  /**
+   * Retrieves the global leaderboard with pagination.
+   * 
+   * This method returns paginated leaderboard entries ordered by rank.
+   * Results include user relations for display purposes.
+   * 
+   * @param page - The page number to retrieve (default: 1)
+   * @param limit - The number of entries per page (default: 50)
+   * @returns Promise containing leaderboard entries, total count, and pagination info
+   * 
+   * @example
+   * ```typescript
+   * const { leaderboard, total, page, limit } = await leaderboardService.getGlobalLeaderboard(1, 50);
+   * console.log(`Showing ${leaderboard.length} of ${total} entries`);
+   * ```
+   */
   async getGlobalLeaderboard(
     page: number = 1,
     limit: number = 50,
@@ -141,6 +205,22 @@ export class LeaderboardService {
     return { leaderboard, total, page, limit };
   }
 
+  /**
+   * Retrieves a specific user's leaderboard entry.
+   * 
+   * This method returns the leaderboard entry for a specific user,
+   * including their rank and user relation data.
+   * 
+   * @param userId - The ID of the user to retrieve
+   * @returns Promise containing the leaderboard entry
+   * @throws {NotFoundException} If user is not found on the leaderboard
+   * 
+   * @example
+   * ```typescript
+   * const entry = await leaderboardService.getUserLeaderboard('user-id');
+   * console.log(`User rank: ${entry.rank}, score: ${entry.score}`);
+   * ```
+   */
   async getUserLeaderboard(userId: string): Promise<Leaderboard> {
     const leaderboardEntry = await this.leaderboardRepository.findOne({
       where: { userId },
@@ -154,6 +234,21 @@ export class LeaderboardService {
     return leaderboardEntry;
   }
 
+  /**
+   * Updates a user's score on the leaderboard.
+   * 
+   * This method is an alias for submitScore, allowing score updates
+   * through the update endpoint interface.
+   * 
+   * @param userId - The ID of the user to update
+   * @param updateLeaderboardDto - Object containing the new score
+   * @returns Promise containing the updated leaderboard entry
+   * 
+   * @example
+   * ```typescript
+   * const entry = await leaderboardService.updateScore('user-id', { score: 2000 });
+   * ```
+   */
   async updateScore(
     userId: string,
     updateLeaderboardDto: UpdateLeaderboardDto,
@@ -162,8 +257,16 @@ export class LeaderboardService {
   }
 
   /**
-   * Recalculate ranks using a single SQL UPDATE with RANK() window function.
-   * Efficient for large datasets — no in-memory row loading.
+   * Recalculates ranks using a single SQL UPDATE with RANK() window function.
+   * 
+   * This method efficiently recalculates all leaderboard ranks using
+   * SQL window functions, avoiding in-memory row loading for large datasets.
+   * It runs automatically every 5 minutes via cron job.
+   * 
+   * @example
+   * ```typescript
+   * await leaderboardService.recalculateRanks();
+   * ```
    */
   // Batched rank recalculation every 5 minutes
   @Cron('*/5 * * * *')
@@ -172,6 +275,15 @@ export class LeaderboardService {
     await this.invalidateGlobalLeaderboardCache();
   }
 
+  /**
+   * Recalculates ranks using the specified entity manager.
+   * 
+   * This private method performs the actual rank recalculation using
+   * SQL window functions for efficiency.
+   * 
+   * @param manager - The TypeORM entity manager to use for the query
+   * @private
+   */
   private async recalculateRanksWithManager(
     manager: import('typeorm').EntityManager,
   ): Promise<void> {
@@ -186,16 +298,47 @@ export class LeaderboardService {
     `);
   }
 
+  /**
+   * Forces an immediate rank recalculation.
+   * 
+   * This method triggers an immediate rank recalculation outside of
+   * the normal cron schedule. Useful for manual rank fixes.
+   * 
+   * @example
+   * ```typescript
+   * await leaderboardService.forceRecalculateRanks();
+   * ```
+   */
   async forceRecalculateRanks(): Promise<void> {
     await this.recalculateRanks();
   }
 
+  /**
+   * Resets the entire leaderboard.
+   * 
+   * This method clears all leaderboard entries, invalidates cache,
+   * and emits a reset event to connected clients. Use with caution.
+   * 
+   * @example
+   * ```typescript
+   * await leaderboardService.resetLeaderboard();
+   * ```
+   */
   async resetLeaderboard(): Promise<void> {
     await this.leaderboardRepository.clear();
     await this.invalidateLeaderboardCache();
     await this.emitRealtimeLeaderboardUpdate('global', 'reset');
   }
 
+  /**
+   * Invalidates leaderboard cache entries.
+   * 
+   * This private method clears cached leaderboard data for both
+   * the global leaderboard and specific user entries.
+   * 
+   * @param userId - Optional user ID to invalidate specific user cache
+   * @private
+   */
   private async invalidateLeaderboardCache(userId?: string): Promise<void> {
     await this.invalidateGlobalLeaderboardCache();
     if (userId) {
@@ -204,6 +347,13 @@ export class LeaderboardService {
     }
   }
 
+  /**
+   * Invalidates global leaderboard cache for common page/limit combinations.
+   * 
+   * This private method clears cached leaderboard data for the most
+   * commonly accessed page and limit combinations.
+   * @private
+   */
   private async invalidateGlobalLeaderboardCache(): Promise<void> {
     // Invalidate common page/limit combinations
     for (const page of [1, 2, 3]) {
@@ -214,6 +364,16 @@ export class LeaderboardService {
     }
   }
 
+  /**
+   * Emits real-time leaderboard updates to connected clients.
+   * 
+   * This private method broadcasts leaderboard updates via WebSocket
+   * to all subscribed clients, including the top 100 entries.
+   * 
+   * @param leaderboardId - The ID of the leaderboard to update
+   * @param updateType - The type of update (score_change, rank_change, new_entry, reset)
+   * @private
+   */
   private async emitRealtimeLeaderboardUpdate(
     leaderboardId: string,
     updateType: 'score_change' | 'rank_change' | 'new_entry' | 'reset',

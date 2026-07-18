@@ -28,6 +28,26 @@ const wsCorsOrigin = ((): string | string[] | boolean => {
   return origins.length === 1 ? origins[0] : origins;
 })();
 
+/**
+ * WebSocket gateway for real-time communication.
+ * 
+ * This gateway handles real-time updates for leaderboards, game sessions,
+ * and user notifications. It uses Socket.IO with JWT authentication and
+ * supports room-based subscriptions for targeted updates.
+ * 
+ * ## Connection
+ * - Namespace: `/realtime`
+ * - Authentication: JWT token via query parameter or handshake auth
+ * - CORS: Configured via `CORS_ENABLED` and `ALLOWED_ORIGINS` env vars
+ * 
+ * @example
+ * ```typescript
+ * // Client-side connection
+ * const socket = io('http://localhost:3000/realtime', {
+ *   auth: { token: 'jwt_token_here' }
+ * });
+ * ```
+ */
 @WebSocketGateway({
   namespace: '/realtime',
   cors:
@@ -49,6 +69,21 @@ export class RealtimeGateway
   // Track connected users for demonstration
   private connectedUsers: Map<string, string> = new Map();
 
+  /**
+   * Handles new WebSocket connections.
+   * 
+   * This method is called when a client connects to the gateway. It validates
+   * the JWT token, adds the user to their personal room, and tracks the connection.
+   * 
+   * @param client - The connected socket instance
+   * @throws Will disconnect the client if authentication fails
+   * 
+   * @example
+   * ```typescript
+   * // Client automatically joins room: user:{userId}
+   * // Server logs connection with socket ID
+   * ```
+   */
   @UseGuards(WsJwtGuard)
   handleConnection(client: Socket) {
     try {
@@ -87,6 +122,14 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Handles WebSocket disconnections.
+   * 
+   * This method is called when a client disconnects from the gateway.
+   * It logs the disconnection and removes the user from the tracking map.
+   * 
+   * @param client - The disconnected socket instance
+   */
   handleDisconnect(client: Socket) {
     const userId = this.connectedUsers.get(client.id);
     if (userId) {
@@ -106,6 +149,25 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Subscribes a client to leaderboard updates.
+   * 
+   * This method adds the client to a leaderboard-specific room, enabling
+   * them to receive real-time updates for that leaderboard.
+   * 
+   * @param client - The socket instance making the request
+   * @param data - Object containing the leaderboard ID
+   * @returns Object indicating subscription status or error
+   * 
+   * @example
+   * ```typescript
+   * // Client-side
+   * socket.emit('leaderboard:subscribe', { leaderboardId: 'daily-123' });
+   * 
+   * // Server response
+   * { event: 'subscribed', leaderboardId: 'daily-123' }
+   * ```
+   */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('leaderboard:subscribe')
   handleLeaderboardSubscribe(
@@ -135,6 +197,25 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Subscribes a client to game session updates.
+   * 
+   * This method adds the client to a game-specific room, enabling
+   * them to receive real-time updates for that game session.
+   * 
+   * @param client - The socket instance making the request
+   * @param data - Object containing the game ID
+   * @returns Object indicating subscription status or error
+   * 
+   * @example
+   * ```typescript
+   * // Client-side
+   * socket.emit('game:subscribe', { gameId: 'game-abc-123' });
+   * 
+   * // Server response
+   * { event: 'subscribed', gameId: 'game-abc-123' }
+   * ```
+   */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('game:subscribe')
   handleGameSubscribe(
@@ -160,6 +241,25 @@ export class RealtimeGateway
     }
   }
 
+  /**
+   * Emits a leaderboard update to all subscribed clients.
+   * 
+   * This method broadcasts leaderboard updates to all clients subscribed
+   * to the specific leaderboard room.
+   * 
+   * @param leaderboardId - The ID of the leaderboard
+   * @param scores - Array of score data to broadcast
+   * @param updateType - Type of update (score_change, rank_change, new_entry, reset)
+   * 
+   * @example
+   * ```typescript
+   * this.realtimeGateway.emitLeaderboardUpdate(
+   *   'daily-123',
+   *   [{ userId: 1, score: 100, rank: 1 }],
+   *   'score_change'
+   * );
+   * ```
+   */
   emitLeaderboardUpdate(
     leaderboardId: string,
     scores: any[],
@@ -193,6 +293,22 @@ export class RealtimeGateway
     );
   }
 
+  /**
+   * Emits a rank change notification to a specific user.
+   * 
+   * This method sends a personalized rank change update to a user's
+   * personal room.
+   * 
+   * @param userId - The ID of the user to notify
+   * @param oldRank - The user's previous rank
+   * @param newRank - The user's new rank
+   * @param score - The user's current score
+   * 
+   * @example
+   * ```typescript
+   * this.realtimeGateway.emitUserRankChange(123, 5, 3, 1500);
+   * ```
+   */
   emitUserRankChange(
     userId: string,
     oldRank: number,
@@ -208,6 +324,23 @@ export class RealtimeGateway
     });
   }
 
+  /**
+   * Emits leaderboard statistics to subscribed clients.
+   * 
+   * This method broadcasts statistical information about a leaderboard
+   * to all subscribed clients.
+   * 
+   * @param leaderboardId - The ID of the leaderboard
+   * @param stats - Object containing leaderboard statistics
+   * 
+   * @example
+   * ```typescript
+   * this.realtimeGateway.emitLeaderboardStats('daily-123', {
+   *   totalPlayers: 100,
+   *   averageScore: 750
+   * });
+   * ```
+   */
   emitLeaderboardStats(leaderboardId: string, stats: any) {
     this.server.to(`leaderboard:${leaderboardId}`).emit('leaderboard:stats', {
       leaderboardId,
@@ -216,12 +349,46 @@ export class RealtimeGateway
     });
   }
 
+  /**
+   * Emits a game state change to subscribed clients.
+   * 
+   * This method broadcasts game state transitions to all clients
+   * subscribed to the specific game room.
+   * 
+   * @param gameId - The ID of the game
+   * @param state - The new game state (started, paused, ended)
+   * 
+   * @example
+   * ```typescript
+   * this.realtimeGateway.emitGameStateChange('game-abc-123', 'started');
+   * ```
+   */
   emitGameStateChange(gameId: string, state: 'started' | 'paused' | 'ended') {
     this.server
       .to(`game:${gameId}`)
       .emit('game:state-change', { gameId, state });
   }
 
+  /**
+   * Emits a notification to a specific user.
+   * 
+   * This method sends a notification to a user's personal room.
+   * 
+   * @param userId - The ID of the user to notify
+   * @param message - The notification message
+   * @param type - The notification type (info, success, warning, error)
+   * @param icon - Optional icon identifier for the notification
+   * 
+   * @example
+   * ```typescript
+   * this.realtimeGateway.emitNotification(
+   *   '123',
+   *   'You earned a new badge!',
+   *   'success',
+   *   'trophy'
+   * );
+   * ```
+   */
   emitNotification(
     userId: string,
     message: string,
@@ -233,6 +400,27 @@ export class RealtimeGateway
       .emit('notification:alert', { message, type, icon });
   }
 
+  /**
+   * Handles notification sending from admin clients.
+   * 
+   * This method allows admin users to send notifications to specific users.
+   * It validates the notification payload and checks for admin role.
+   * 
+   * @param client - The socket instance making the request
+   * @param payload - The notification data to send
+   * @returns Object indicating send status or error
+   * @throws {ValidationError} If the payload fails validation
+   * 
+   * @example
+   * ```typescript
+   * // Client-side (admin only)
+   * socket.emit('notification:send', {
+   *   userId: '123',
+   *   message: 'System maintenance in 1 hour',
+   *   type: 'warning'
+   * });
+   * ```
+   */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('notification:send')
   async handleSendNotification(

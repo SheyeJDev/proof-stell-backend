@@ -20,10 +20,38 @@ export interface SessionAnalytics {
   averageDuration: number;
 }
 
+/**
+ * Service for managing game sessions and input events.
+ * 
+ * This service handles game session lifecycle including starting sessions,
+ * reporting session results with integrity verification, and retrieving
+ * session analytics. It uses cryptographic nonces and HMAC signatures
+ * to ensure session integrity and prevent cheating.
+ * 
+ * @example
+ * ```typescript
+ * const gameSessionService = new GameSessionService(
+ *   gameSessionRepository,
+ *   inputEventRepository,
+ *   dataSource
+ * );
+ * const { sessionId, nonce } = await gameSessionService.startSession(
+ *   'user-id',
+ *   { challengeId: 'challenge-123' }
+ * );
+ * ```
+ */
 @Injectable()
 export class GameSessionService {
   private readonly logger = new Logger(GameSessionService.name);
 
+  /**
+   * Creates a new GameSessionService instance.
+   * 
+   * @param gameSessionRepository - TypeORM repository for GameSession entity
+   * @param inputEventRepository - TypeORM repository for InputEvent entity
+   * @param dataSource - TypeORM data source for transaction management
+   */
   constructor(
     @InjectRepository(GameSession)
     private gameSessionRepository: Repository<GameSession>,
@@ -32,6 +60,26 @@ export class GameSessionService {
     private dataSource: DataSource,
   ) {}
 
+  /**
+   * Starts a new game session for a user.
+   * 
+   * This method creates a new game session with a cryptographic nonce
+   * for integrity verification. The nonce must be used when reporting
+   * the session results to prevent tampering.
+   * 
+   * @param userId - The ID of the user starting the session
+   * @param dto - Object containing the challenge ID
+   * @returns Promise containing the session ID and nonce
+   * 
+   * @example
+   * ```typescript
+   * const { sessionId, nonce } = await gameSessionService.startSession(
+   *   'user-id',
+   *   { challengeId: 'challenge-123' }
+   * );
+   * // Store nonce securely for later reporting
+   * ```
+   */
   async startSession(
     userId: string,
     dto: StartSessionDto,
@@ -47,6 +95,31 @@ export class GameSessionService {
     return { sessionId: savedSession.id, nonce };
   }
 
+  /**
+   * Reports the results of a completed game session.
+   * 
+   * This method verifies session integrity using HMAC signature,
+   * stores the session results, and batches input events for performance.
+   * The session can only be reported once and must include a valid signature.
+   * 
+   * @param userId - The ID of the user reporting the session
+   * @param reportSessionDto - Object containing session data, inputs, and signature
+   * @returns Promise containing the saved game session
+   * @throws {NotFoundException} If session not found or doesn't belong to user
+   * @throws {BadRequestException} If session already reported or signature invalid
+   * 
+   * @example
+   * ```typescript
+   * const session = await gameSessionService.reportSession('user-id', {
+   *   sessionId: 'session-id',
+   *   challengeId: 'challenge-123',
+   *   score: 100,
+   *   duration: 60,
+   *   inputs: [...],
+   *   signature: 'hmac-signature'
+   * });
+   * ```
+   */
   async reportSession(
     userId: string,
     reportSessionDto: ReportSessionDto,
@@ -130,6 +203,29 @@ export class GameSessionService {
     }
   }
 
+  /**
+   * Retrieves game sessions for a specific user.
+   * 
+   * This method returns paginated game sessions for a user. Users can
+   * only access their own sessions unless they have admin role.
+   * 
+   * @param userId - The ID of the user to fetch sessions for
+   * @param requestingUser - The user making the request (for authorization)
+   * @param limit - Maximum number of sessions to return (default: 50)
+   * @param offset - Number of sessions to skip (default: 0)
+   * @returns Promise containing sessions array and total count
+   * @throws {ForbiddenException} If user tries to access another user's sessions
+   * 
+   * @example
+   * ```typescript
+   * const { sessions, total } = await gameSessionService.findSessionsByUser(
+   *   'user-id',
+   *   { id: 'user-id', role: 'user' },
+   *   50,
+   *   0
+   * );
+   * ```
+   */
   async findSessionsByUser(
     userId: string,
     requestingUser: { id: string; role: string },
@@ -160,6 +256,21 @@ export class GameSessionService {
     return { sessions, total };
   }
 
+  /**
+   * Retrieves a specific game session by ID.
+   * 
+   * This method returns complete session data including user, challenge,
+   * and input event relations.
+   * 
+   * @param sessionId - The ID of the session to retrieve
+   * @returns Promise containing the game session
+   * @throws {NotFoundException} If session with the specified ID does not exist
+   * 
+   * @example
+   * ```typescript
+   * const session = await gameSessionService.findSessionById('session-id');
+   * ```
+   */
   async findSessionById(sessionId: string): Promise<GameSession> {
     const session = await this.gameSessionRepository.findOne({
       where: { id: sessionId },
@@ -173,6 +284,26 @@ export class GameSessionService {
     return session;
   }
 
+  /**
+   * Retrieves analytics for game sessions.
+   * 
+   * This method calculates aggregate statistics for game sessions,
+   * optionally filtered by user or challenge. Returns total sessions,
+   * average score, highest score, and average duration.
+   * 
+   * @param userId - Optional user ID to filter by
+   * @param challengeId - Optional challenge ID to filter by
+   * @returns Promise containing session analytics
+   * 
+   * @example
+   * ```typescript
+   * const analytics = await gameSessionService.getSessionAnalytics(
+   *   'user-id',
+   *   'challenge-123'
+   * );
+   * console.log(`Average score: ${analytics.averageScore}`);
+   * ```
+   */
   async getSessionAnalytics(
     userId?: string,
     challengeId?: string,
@@ -204,6 +335,17 @@ export class GameSessionService {
     return analytics as SessionAnalytics;
   }
 
+  /**
+   * Calculates the HMAC signature for session integrity verification.
+   * 
+   * This private method creates a cryptographic signature using the
+   * session nonce and key session data to prevent tampering.
+   * 
+   * @param nonce - The cryptographic nonce from session start
+   * @param sessionData - The session data to sign
+   * @returns The HMAC signature as a hex string
+   * @private
+   */
   private calculateSessionHash(
     nonce: string,
     sessionData: ReportSessionDto,
@@ -227,6 +369,17 @@ export class GameSessionService {
       .digest('hex');
   }
 
+  /**
+   * Splits an array into chunks of specified size.
+   * 
+   * This private method is used for batching input events
+   * to improve database insertion performance.
+   * 
+   * @param array - The array to chunk
+   * @param size - The size of each chunk
+   * @returns Array of chunks
+   * @private
+   */
   private chunkArray<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];
     for (let i = 0; i < array.length; i += size) {
