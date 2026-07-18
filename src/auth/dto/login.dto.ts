@@ -8,7 +8,19 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
+/**
+ * Data transfer object for user login.
+ * 
+ * This DTO validates and structures user login requests,
+ * ensuring email and password are provided in the correct format.
+ */
 export class LoginDto {
+  /**
+   * The user's email address.
+   * Must be a valid email format. Automatically normalized to lowercase and trimmed.
+   * 
+   * @example "user@example.com"
+   */
   @ApiProperty({
     description: 'User email address',
     example: 'user@example.com',
@@ -20,6 +32,12 @@ export class LoginDto {
   @MaxLength(254, { message: 'Email must not exceed 254 characters' })
   email: string;
 
+  /**
+   * The user's password.
+   * Must be 8-128 characters long.
+   * 
+   * @example "SecurePass123!"
+   */
   @ApiProperty({
     description: 'User password',
     example: 'SecurePass123!',

@@ -29,15 +29,50 @@ interface LoginContext {
   userAgent?: string;
 }
 
+/**
+ * Metadata for account lockout state.
+ */
 interface LockoutMetadata {
   lockedUntil: number;
   attempts: number;
 }
 
+/**
+ * Service for managing user authentication and authorization.
+ * 
+ * This service handles user registration, login, logout, email verification,
+ * and account security features including login attempt tracking and account lockout.
+ * It integrates with JWT for token-based authentication and bcrypt for password hashing.
+ * 
+ * @example
+ * ```typescript
+ * const authService = new AuthService(
+ *   userService,
+ *   authTokenService,
+ *   hashingService,
+ *   mailService,
+ *   cacheService,
+ *   configService,
+ *   analyticsService
+ * );
+ * const { access_token, user } = await authService.login(validatedUser);
+ * ```
+ */
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  /**
+   * Creates a new AuthService instance.
+   * 
+   * @param userService - Service for user data operations
+   * @param authTokenService - Service for JWT token management
+   * @param hashingService - Service for password hashing
+   * @param mailService - Service for sending emails
+   * @param cacheService - Service for caching operations
+   * @param configService - Service for configuration values
+   * @param analyticsService - Service for analytics tracking
+   */
   constructor(
     private userService: UserService,
     private readonly authTokenService: AuthTokenService,
@@ -49,6 +84,31 @@ export class AuthService {
     private readonly analyticsService: AnalyticsService,
   ) {}
 
+  /**
+   * Validates user credentials for authentication.
+   * 
+   * This method checks the user's email and password, verifies account status,
+   * and enforces account lockout policies for failed login attempts. It tracks
+   * failed attempts by email, IP address, and user agent to prevent brute force attacks.
+   * 
+   * @param email - The user's email address
+   * @param password - The user's plain-text password
+   * @param clientIp - The client's IP address for lockout tracking
+   * @param userAgent - The client's user agent for device tracking
+   * @returns Promise containing the validated user object
+   * @throws {UnauthorizedException} If credentials are invalid, account is inactive,
+   *         email is not verified, or account is locked
+   * 
+   * @example
+   * ```typescript
+   * const user = await authService.validateUser(
+   *   'user@example.com',
+   *   'password123',
+   *   '192.168.1.1',
+   *   'Mozilla/5.0...'
+   * );
+   * ```
+   */
   async validateUser(
     email: string,
     password: string,
@@ -103,6 +163,24 @@ export class AuthService {
     return user;
   }
 
+  /**
+   * Authenticates a user and generates an access token.
+   * 
+   * This method updates the user's last login timestamp, tracks the login event
+   * in analytics, and generates a JWT access token for the user.
+   * 
+   * @param user - The validated user object
+   * @param context - Optional login context (IP, user agent)
+   * @returns Object containing the access token and user data
+   * 
+   * @example
+   * ```typescript
+   * const { access_token, user } = await authService.login(validatedUser, {
+   *   ip: '192.168.1.1',
+   *   userAgent: 'Mozilla/5.0...'
+   * });
+   * ```
+   */
   async login(user: any, context?: LoginContext) {
     // Update last login
     await this.userService.updateLastLogin(user.id);
@@ -126,10 +204,45 @@ export class AuthService {
     };
   }
 
+  /**
+   * Logs out a user by revoking their access token.
+   * 
+   * This method adds the access token to the revocation list, preventing
+   * its use for future authentication requests.
+   * 
+   * @param accessToken - The JWT access token to revoke
+   * 
+   * @example
+   * ```typescript
+   * await authService.logout(accessToken);
+   * ```
+   */
   async logout(accessToken: string): Promise<void> {
     await this.authTokenService.revokeAccessToken(accessToken);
   }
 
+  /**
+   * Registers a new user account.
+   * 
+   * This method creates a new user with the provided credentials, generates
+   * an email verification token, and sends a verification email to the user.
+   * The account is created in an unverified state and cannot be used until
+   * the email is verified.
+   * 
+   * @param registerDto - The registration data containing email, username, and password
+   * @returns Promise containing the access token (empty until verified) and user data
+   * @throws {ConflictException} If email or username already exists
+   * @throws {Error} If registration fails for other reasons
+   * 
+   * @example
+   * ```typescript
+   * const { user } = await authService.register({
+   *   email: 'user@example.com',
+   *   username: 'player1',
+   *   password: 'SecurePass123'
+   * });
+   * ```
+   */
   async register(
     registerDto: RegisterDto,
   ): Promise<{ access_token: string; user: ReadUserDto }> {
@@ -168,6 +281,22 @@ export class AuthService {
     }
   }
 
+  /**
+   * Verifies a user's email address using a verification token.
+   * 
+   * This method validates the email verification token, checks if it has expired,
+   * and marks the user's email as verified if the token is valid.
+   * 
+   * @param token - The email verification token sent to the user
+   * @returns Promise containing true if verification was successful
+   * @throws {UnauthorizedException} If token is invalid or expired
+   * @throws {ConflictException} If email is already verified
+   * 
+   * @example
+   * ```typescript
+   * const verified = await authService.verifyEmail('uuid-token-here');
+   * ```
+   */
   async verifyEmail(token: string): Promise<boolean> {
     const user = await this.userService.findByVerificationToken(token);
     if (!user)
@@ -188,6 +317,22 @@ export class AuthService {
     return true;
   }
 
+  /**
+   * Resends the email verification token to a user.
+   * 
+   * This method generates a new verification token for an unverified user
+   * and sends it via email. Useful if the previous token expired or was lost.
+   * 
+   * @param email - The user's email address
+   * @returns Promise containing true if the email was sent successfully
+   * @throws {UnauthorizedException} If user is not found
+   * @throws {ConflictException} If email is already verified
+   * 
+   * @example
+   * ```typescript
+   * await authService.resendVerificationEmail('user@example.com');
+   * ```
+   */
   async resendVerificationEmail(email: string): Promise<any> {
     const user = await this.userService.findByEmail(email);
     if (!user) throw new UnauthorizedException('User not found');
@@ -288,7 +433,26 @@ export class AuthService {
   }
 
   /**
-   * Get remaining lockout time for an email
+   * Gets the remaining lockout time for a user's account.
+   * 
+   * This method checks if an account is currently locked due to too many
+   * failed login attempts and returns the remaining time in seconds.
+   * 
+   * @param email - The user's email address
+   * @param clientIp - The client's IP address for lockout lookup
+   * @param userAgent - The client's user agent for device-specific lookup
+   * @returns Promise containing the remaining lockout time in seconds (0 if not locked)
+   * 
+   * @example
+   * ```typescript
+   * const remainingSeconds = await authService.getRemainingLockoutTime(
+   *   'user@example.com',
+   *   '192.168.1.1'
+   * );
+   * if (remainingSeconds > 0) {
+   *   console.log(`Account locked for ${remainingSeconds} seconds`);
+   * }
+   * ```
    */
   async getRemainingLockoutTime(
     email: string,
@@ -320,7 +484,20 @@ export class AuthService {
   }
 
   /**
-   * Manually unlock an account (admin function)
+   * Manually unlocks a user's account (admin function).
+   * 
+   * This method clears failed login attempts and removes account lockout
+   * for a specific user. This is typically used by administrators to unlock
+   * accounts that were locked due to suspicious activity.
+   * 
+   * @param email - The user's email address
+   * @param clientIp - The IP address to clear lockout for
+   * @param userAgent - The user agent to clear lockout for
+   * 
+   * @example
+   * ```typescript
+   * await authService.unlockAccount('user@example.com');
+   * ```
    */
   async unlockAccount(
     email: string,
