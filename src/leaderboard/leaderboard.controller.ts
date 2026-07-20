@@ -8,6 +8,7 @@ import {
   Query,
   ParseIntPipe,
   DefaultValuePipe,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,6 +18,7 @@ import {
   ApiQuery,
   ApiBody,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { LeaderboardService } from './Leaderboard.service';
 import { CreateLeaderboardDto } from './dto/create-leaderboard.dto';
 import {
@@ -29,7 +31,6 @@ import { Role } from '../common/enums/role.enum';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { plainToClass } from 'class-transformer';
-import { UseInterceptors } from '@nestjs/common';
 import { CacheInterceptor } from '../cache/interceptors/cache.interceptor';
 import { Cacheable, CacheKeys } from '../cache/decorators/cache.decorator';
 
@@ -101,6 +102,10 @@ export class LeaderboardController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.PLAYER, Role.ADMIN)
+  @ApiOperation({ summary: 'Submit a leaderboard score' })
+  @ApiResponse({ status: 429, description: 'Score submit rate limit: 1 per second per user' })
+  // Leaderboard submit: 1 per second per user to prevent score-spam attacks
+  @Throttle({ default: { ttl: 1, limit: 1 } })
   async submitScore(
     @Req() req: RequestWithUser,
     @Body() createLeaderboardDto: CreateLeaderboardDto,
