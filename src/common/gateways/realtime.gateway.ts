@@ -12,6 +12,8 @@ import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from './guards/ws-jwt.guard';
 import { LoggingService } from '../../logging/logging.service';
 import { NotificationDto } from './dto/notification.dto';
+import { LeaderboardSubscribeDto } from './dto/leaderboard-subscribe.dto';
+import { GameSubscribeDto } from './dto/game-subscribe.dto';
 import { validateOrReject, ValidationError } from 'class-validator';
 
 /** Derive WebSocket CORS origins from the same env var as HTTP CORS. */
@@ -29,17 +31,52 @@ const wsCorsOrigin = ((): string | string[] | boolean => {
 })();
 
 /**
+ * Per-user event rate limiting for WebSocket events.
+ * Tracks event counts per userId per event type within a sliding window.
+ * Limit: 1 event per second per user per event type.
+ */
+class WsRateLimiter {
+  /** Map of `${userId}:${event}` -> array of timestamps */
+  private readonly windows: Map<string, number[]> = new Map();
+
+  /**
+   * Returns true if the request is allowed, false if rate-limited.
+   * @param userId  The authenticated user ID
+   * @param event   The WebSocket event name
+   * @param limit   Max events per window
+   * @param windowMs Window size in milliseconds
+   */
+  isAllowed(userId: string, event: string, limit = 60, windowMs = 60_000): boolean {
+    const key = `${userId}:${event}`;
+    const now = Date.now();
+    const timestamps = (this.windows.get(key) ?? []).filter(
+      (t) => now - t < windowMs,
+    );
+    if (timestamps.length >= limit) {
+      return false;
+    }
+    timestamps.push(now);
+    this.windows.set(key, timestamps);
+    return true;
+  }
+}
+
+/**
  * WebSocket gateway for real-time communication.
- * 
+ *
  * This gateway handles real-time updates for leaderboards, game sessions,
  * and user notifications. It uses Socket.IO with JWT authentication and
  * supports room-based subscriptions for targeted updates.
- * 
+ *
+ * All incoming event payloads are validated against typed DTOs before
+ * processing. Per-user rate limiting is enforced on all subscriptions
+ * to prevent DoS via WebSocket flooding.
+ *
  * ## Connection
  * - Namespace: `/realtime`
  * - Authentication: JWT token via query parameter or handshake auth
  * - CORS: Configured via `CORS_ENABLED` and `ALLOWED_ORIGINS` env vars
- * 
+ *
  * @example
  * ```typescript
  * // Client-side connection
@@ -64,26 +101,13 @@ export class RealtimeGateway
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly loggingService: LoggingService) {}
-
-  // Track connected users for demonstration
   private connectedUsers: Map<string, string> = new Map();
 
-  /**
-   * Handles new WebSocket connections.
-   * 
-   * This method is called when a client connects to the gateway. It validates
-   * the JWT token, adds the user to their personal room, and tracks the connection.
-   * 
-   * @param client - The connected socket instance
-   * @throws Will disconnect the client if authentication fails
-   * 
-   * @example
-   * ```typescript
-   * // Client automatically joins room: user:{userId}
-   * // Server logs connection with socket ID
-   * ```
-   */
+  /** Per-user WebSocket rate limiter */
+  private readonly rateLimiter = new WsRateLimiter();
+
+  constructor(private readonly loggingService: LoggingService) {}
+
   @UseGuards(WsJwtGuard)
   handleConnection(client: Socket) {
     try {
@@ -122,14 +146,6 @@ export class RealtimeGateway
     }
   }
 
-  /**
-   * Handles WebSocket disconnections.
-   * 
-   * This method is called when a client disconnects from the gateway.
-   * It logs the disconnection and removes the user from the tracking map.
-   * 
-   * @param client - The disconnected socket instance
-   */
   handleDisconnect(client: Socket) {
     const userId = this.connectedUsers.get(client.id);
     if (userId) {
@@ -151,47 +167,39 @@ export class RealtimeGateway
 
   /**
    * Subscribes a client to leaderboard updates.
-   * 
-   * This method adds the client to a leaderboard-specific room, enabling
-   * them to receive real-time updates for that leaderboard.
-   * 
-   * @param client - The socket instance making the request
-   * @param data - Object containing the leaderboard ID
-   * @returns Object indicating subscription status or error
-   * 
-   * @example
-   * ```typescript
-   * // Client-side
-   * socket.emit('leaderboard:subscribe', { leaderboardId: 'daily-123' });
-   * 
-   * // Server response
-   * { event: 'subscribed', leaderboardId: 'daily-123' }
-   * ```
+   *
+   * Payload is validated against {@link LeaderboardSubscribeDto}.
+   * Rate limited to 60 subscription events per minute per user.
    */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('leaderboard:subscribe')
-  handleLeaderboardSubscribe(
+  async handleLeaderboardSubscribe(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { leaderboardId: string },
+    @MessageBody() data: unknown,
   ) {
     try {
-      if (
-        !data ||
-        typeof data.leaderboardId !== 'string' ||
-        !data.leaderboardId.trim()
-      ) {
-        return { error: 'Invalid leaderboardId' };
+      const userId = this.connectedUsers.get(client.id);
+      if (!userId) return { error: 'Not authenticated' };
+
+      // Per-user rate limit: 60 subscription events/min
+      if (!this.rateLimiter.isAllowed(userId, 'leaderboard:subscribe', 60, 60_000)) {
+        return { error: 'Rate limit exceeded. Slow down.' };
       }
-      client.join(`leaderboard:${data.leaderboardId}`);
-      return { event: 'subscribed', leaderboardId: data.leaderboardId };
+
+      // Validate and sanitize payload via DTO
+      const dto = Object.assign(new LeaderboardSubscribeDto(), data ?? {});
+      await validateOrReject(dto);
+
+      client.join(`leaderboard:${dto.leaderboardId}`);
+      return { event: 'subscribed', leaderboardId: dto.leaderboardId };
     } catch (err) {
+      if (Array.isArray(err) && err[0] instanceof ValidationError) {
+        return { error: 'Invalid payload', details: 'leaderboardId must be a non-empty string' };
+      }
       this.loggingService.error(
         'Error in leaderboard:subscribe',
         err instanceof Error ? err : new Error(String(err)),
-        {
-          module: 'realtime',
-          action: 'leaderboard:subscribe',
-        },
+        { module: 'realtime', action: 'leaderboard:subscribe' },
       );
       return { error: 'Subscription failed' };
     }
@@ -199,67 +207,44 @@ export class RealtimeGateway
 
   /**
    * Subscribes a client to game session updates.
-   * 
-   * This method adds the client to a game-specific room, enabling
-   * them to receive real-time updates for that game session.
-   * 
-   * @param client - The socket instance making the request
-   * @param data - Object containing the game ID
-   * @returns Object indicating subscription status or error
-   * 
-   * @example
-   * ```typescript
-   * // Client-side
-   * socket.emit('game:subscribe', { gameId: 'game-abc-123' });
-   * 
-   * // Server response
-   * { event: 'subscribed', gameId: 'game-abc-123' }
-   * ```
+   *
+   * Payload is validated against {@link GameSubscribeDto}.
+   * Rate limited to 60 subscription events per minute per user.
    */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('game:subscribe')
-  handleGameSubscribe(
+  async handleGameSubscribe(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { gameId: string },
+    @MessageBody() data: unknown,
   ) {
     try {
-      if (!data || typeof data.gameId !== 'string' || !data.gameId.trim()) {
-        return { error: 'Invalid gameId' };
+      const userId = this.connectedUsers.get(client.id);
+      if (!userId) return { error: 'Not authenticated' };
+
+      // Per-user rate limit: 60 game subscribe events/min
+      if (!this.rateLimiter.isAllowed(userId, 'game:subscribe', 60, 60_000)) {
+        return { error: 'Rate limit exceeded. Slow down.' };
       }
-      client.join(`game:${data.gameId}`);
-      return { event: 'subscribed', gameId: data.gameId };
+
+      // Validate and sanitize payload via DTO
+      const dto = Object.assign(new GameSubscribeDto(), data ?? {});
+      await validateOrReject(dto);
+
+      client.join(`game:${dto.gameId}`);
+      return { event: 'subscribed', gameId: dto.gameId };
     } catch (err) {
+      if (Array.isArray(err) && err[0] instanceof ValidationError) {
+        return { error: 'Invalid payload', details: 'gameId must be a non-empty string' };
+      }
       this.loggingService.error(
         'Error in game:subscribe',
         err instanceof Error ? err : new Error(String(err)),
-        {
-          module: 'realtime',
-          action: 'game:subscribe',
-        },
+        { module: 'realtime', action: 'game:subscribe' },
       );
       return { error: 'Subscription failed' };
     }
   }
 
-  /**
-   * Emits a leaderboard update to all subscribed clients.
-   * 
-   * This method broadcasts leaderboard updates to all clients subscribed
-   * to the specific leaderboard room.
-   * 
-   * @param leaderboardId - The ID of the leaderboard
-   * @param scores - Array of score data to broadcast
-   * @param updateType - Type of update (score_change, rank_change, new_entry, reset)
-   * 
-   * @example
-   * ```typescript
-   * this.realtimeGateway.emitLeaderboardUpdate(
-   *   'daily-123',
-   *   [{ userId: 1, score: 100, rank: 1 }],
-   *   'score_change'
-   * );
-   * ```
-   */
   emitLeaderboardUpdate(
     leaderboardId: string,
     scores: any[],
@@ -293,22 +278,6 @@ export class RealtimeGateway
     );
   }
 
-  /**
-   * Emits a rank change notification to a specific user.
-   * 
-   * This method sends a personalized rank change update to a user's
-   * personal room.
-   * 
-   * @param userId - The ID of the user to notify
-   * @param oldRank - The user's previous rank
-   * @param newRank - The user's new rank
-   * @param score - The user's current score
-   * 
-   * @example
-   * ```typescript
-   * this.realtimeGateway.emitUserRankChange(123, 5, 3, 1500);
-   * ```
-   */
   emitUserRankChange(
     userId: string,
     oldRank: number,
@@ -324,23 +293,6 @@ export class RealtimeGateway
     });
   }
 
-  /**
-   * Emits leaderboard statistics to subscribed clients.
-   * 
-   * This method broadcasts statistical information about a leaderboard
-   * to all subscribed clients.
-   * 
-   * @param leaderboardId - The ID of the leaderboard
-   * @param stats - Object containing leaderboard statistics
-   * 
-   * @example
-   * ```typescript
-   * this.realtimeGateway.emitLeaderboardStats('daily-123', {
-   *   totalPlayers: 100,
-   *   averageScore: 750
-   * });
-   * ```
-   */
   emitLeaderboardStats(leaderboardId: string, stats: any) {
     this.server.to(`leaderboard:${leaderboardId}`).emit('leaderboard:stats', {
       leaderboardId,
@@ -349,77 +301,30 @@ export class RealtimeGateway
     });
   }
 
-  /**
-   * Emits a game state change to subscribed clients.
-   * 
-   * This method broadcasts game state transitions to all clients
-   * subscribed to the specific game room.
-   * 
-   * @param gameId - The ID of the game
-   * @param state - The new game state (started, paused, ended)
-   * 
-   * @example
-   * ```typescript
-   * this.realtimeGateway.emitGameStateChange('game-abc-123', 'started');
-   * ```
-   */
   emitGameStateChange(gameId: string, state: 'started' | 'paused' | 'ended') {
     this.server
       .to(`game:${gameId}`)
       .emit('game:state-change', { gameId, state });
   }
 
-  /**
-   * Emits a notification to a specific user.
-   * 
-   * This method sends a notification to a user's personal room.
-   * 
-   * @param userId - The ID of the user to notify
-   * @param message - The notification message
-   * @param type - The notification type (info, success, warning, error)
-   * @param icon - Optional icon identifier for the notification
-   * 
-   * @example
-   * ```typescript
-   * this.realtimeGateway.emitNotification(
-   *   '123',
-   *   'You earned a new badge!',
-   *   'success',
-   *   'trophy'
-   * );
-   * ```
-   */
   emitNotification(
     userId: string,
     message: string,
     type: string,
     icon?: string,
   ) {
+    // Escape special characters in admin-generated content before broadcast
+    const safeMessage = this.escapeHtml(String(message).slice(0, 1000));
     this.server
       .to(`user:${userId}`)
-      .emit('notification:alert', { message, type, icon });
+      .emit('notification:alert', { message: safeMessage, type, icon });
   }
 
   /**
    * Handles notification sending from admin clients.
-   * 
-   * This method allows admin users to send notifications to specific users.
-   * It validates the notification payload and checks for admin role.
-   * 
-   * @param client - The socket instance making the request
-   * @param payload - The notification data to send
-   * @returns Object indicating send status or error
-   * @throws {ValidationError} If the payload fails validation
-   * 
-   * @example
-   * ```typescript
-   * // Client-side (admin only)
-   * socket.emit('notification:send', {
-   *   userId: '123',
-   *   message: 'System maintenance in 1 hour',
-   *   type: 'warning'
-   * });
-   * ```
+   *
+   * Validates payload, enforces admin-only access, sanitizes message content,
+   * and rate-limits to 30 sends per minute per admin user.
    */
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('notification:send')
@@ -431,6 +336,12 @@ export class RealtimeGateway
       await validateOrReject(Object.assign(new NotificationDto(), payload));
       const user = (client as any).user;
       if (user.role !== 'admin') return { error: 'Unauthorized' };
+
+      // Rate limit admin notification sends: 30/min
+      if (!this.rateLimiter.isAllowed(user.sub, 'notification:send', 30, 60_000)) {
+        return { error: 'Rate limit exceeded' };
+      }
+
       this.emitNotification(
         payload.userId,
         payload.message,
@@ -445,12 +356,21 @@ export class RealtimeGateway
       this.loggingService.error(
         'Error in notification:send',
         err instanceof Error ? err : new Error(String(err)),
-        {
-          module: 'realtime',
-          action: 'notification:send',
-        },
+        { module: 'realtime', action: 'notification:send' },
       );
       return { error: 'Notification failed' };
     }
+  }
+
+  /**
+   * Escapes HTML special characters to prevent XSS in admin-generated content.
+   */
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
   }
 }
