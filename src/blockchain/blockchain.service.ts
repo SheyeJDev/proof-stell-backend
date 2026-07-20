@@ -200,4 +200,31 @@ export class BlockchainService {
     const balance = result?.toString() || '0';
     return { balance };
   }
+
+  async waitForTransactionReceipt(
+    txHash: string,
+    timeoutMs: number = 120000,
+  ): Promise<{ status: 'ACCEPTED_ON_L2' | 'REJECTED'; blockNumber?: number }> {
+    const startTime = Date.now();
+    const pollInterval = 3000;
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const receipt = await this.provider.getTransactionReceipt(txHash);
+        if (receipt) {
+          return {
+            status: receipt.status === 'ACCEPTED_ON_L2' ? 'ACCEPTED_ON_L2' : 'REJECTED',
+            blockNumber: receipt.block_number,
+          };
+        }
+      } catch {
+        // Transaction not yet confirmed, continue polling
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+
+    throw new Error(
+      `Transaction ${txHash} not confirmed within ${timeoutMs}ms`,
+    );
+  }
 }
