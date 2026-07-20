@@ -27,6 +27,7 @@ export interface AppConfig {
   starknetPrivateKey: string;
   starknetAccountAddress: string;
   mintContractAddress: string;
+  blockchainReceiptTimeoutMs: number;
   allowedOrigins: string;
   corsEnabled: boolean;
   // Add more config types as needed
@@ -97,6 +98,10 @@ export class TypedConfigService {
       ),
       mintContractAddress: this.configService.get<string>(
         'app.mintContractAddress',
+      ),
+      blockchainReceiptTimeoutMs: this.configService.get<number>(
+        'app.blockchainReceiptTimeoutMs',
+        120000,
       ),
       allowedOrigins: this.configService.get<string>(
         'app.allowedOrigins',
@@ -182,6 +187,9 @@ export class TypedConfigService {
   }
   get mintContractAddress() {
     return this.app.mintContractAddress;
+  }
+  get blockchainReceiptTimeoutMs() {
+    return this.app.blockchainReceiptTimeoutMs;
   }
   get allowedOrigins() {
     return this.app.allowedOrigins;

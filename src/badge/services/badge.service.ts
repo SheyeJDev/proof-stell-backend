@@ -22,6 +22,7 @@ import type {
   UserProfileBadgesDto,
   LeaderboardEntryDto,
 } from '../dto/badge-response.dto';
+import { IdempotencyService } from '../../common/services/idempotency.service';
 
 @Injectable()
 export class BadgeService {
@@ -32,6 +33,7 @@ export class BadgeService {
     private userBadgeRepository: Repository<UserBadge>,
     private userRepository: Repository<User>,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
   async createBadge(createBadgeDto: CreateBadgeDto): Promise<Badge> {
@@ -79,6 +81,15 @@ export class BadgeService {
     adminId: string,
   ): Promise<UserBadge> {
     const { userId, badgeId, metadata } = awardBadgeDto;
+    const idempotencyKey = this.idempotencyService.generateKey(
+      'award-badge-manually',
+      `${userId}:${badgeId}`,
+    );
+
+    const cachedResult = await this.idempotencyService.check<UserBadge>(idempotencyKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
 
     // Verify user exists
     const user = await this.userRepository.findOne({ where: { id: userId } });
@@ -117,6 +128,7 @@ export class BadgeService {
       `Manually awarded badge "${badge.name}" to user ${user.username} by admin ${adminId}`,
     );
 
+    await this.idempotencyService.store(idempotencyKey, savedUserBadge, 600000);
     return savedUserBadge;
   }
 

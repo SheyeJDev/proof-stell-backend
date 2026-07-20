@@ -1,11 +1,5 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-  Logger,
-  InjectRepository,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { GameSession } from './entities/game-session.entity';
 import { InputEvent } from './entities/input-event.entity';
@@ -223,17 +217,18 @@ export class GameSessionService {
           await this.achievementService.checkAndAwardAchievements(
             c.userId,
             context,
+            c.queryRunner.manager,
           );
         }, async (c) => {
           try {
-            const badges = await this.achievementService['userBadgeRepository']
-              .createQueryBuilder('ub')
+            const badges = await c.queryRunner.manager
+              .createQueryBuilder('ub', 'user_badges')
               .where('ub.userId = :userId', { userId: c.userId })
               .andWhere("ub.metadata->>'gameId' = :gameId", { gameId: c.savedSession?.id })
               .getMany();
 
             for (const badge of badges) {
-              await this.achievementService['userBadgeRepository'].remove(badge);
+              await c.queryRunner.manager.remove(badge);
             }
           } catch {
             // Ignore compensation errors
