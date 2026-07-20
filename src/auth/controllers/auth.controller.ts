@@ -10,6 +10,8 @@ import {
   HttpCode,
   HttpStatus,
   Headers,
+  MaxLength,
+  IsEmail,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -46,7 +48,12 @@ export class AuthController {
     status: 401,
     description: 'Invalid credentials',
   })
-  @Throttle({}) // Use default throttling
+  @ApiResponse({
+    status: 429,
+    description: 'Too many login attempts. Try again in 5 minutes.',
+  })
+  // Strict rate limit: 5 attempts per 5 minutes per IP to prevent brute-force
+  @Throttle({ default: { ttl: 300, limit: 5 } })
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -84,7 +91,12 @@ export class AuthController {
     status: 400,
     description: 'Invalid input data or user already exists',
   })
-  @Throttle({}) // Use default throttling
+  @ApiResponse({
+    status: 429,
+    description: 'Too many registration attempts.',
+  })
+  // Moderate rate limit: 10 registrations per 10 minutes per IP
+  @Throttle({ default: { ttl: 600, limit: 10 } })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body(ValidationPipe) registerDto: RegisterDto) {
@@ -99,6 +111,7 @@ export class AuthController {
         email: {
           type: 'string',
           format: 'email',
+          maxLength: 254,
           example: 'user@example.com',
         },
       },
@@ -113,14 +126,22 @@ export class AuthController {
     status: 400,
     description: 'Invalid email or user not found',
   })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many resend attempts. Try again later.',
+  })
+  // Password reset / resend: 3 attempts per hour per IP to prevent email flooding
+  @Throttle({ default: { ttl: 3600, limit: 3 } })
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(
     @Body('email') email: string,
   ): Promise<MessageResponseDto> {
-    // FIX: Removed manual try/catch block and @Res() hijacking.
-    // NestJS internal exception layers automatically format HTTP status bubbles cleanly.
-    await this.authService.resendVerificationEmail(email);
+    // Sanitize: enforce max length and strip surrounding whitespace before processing
+    if (!email || typeof email !== 'string' || email.trim().length === 0) {
+      return { message: 'Verification email resent' }; // Fail silently to avoid user enumeration
+    }
+    await this.authService.resendVerificationEmail(email.trim().slice(0, 254));
     return { message: 'Verification email resent' };
   }
 
@@ -144,7 +165,6 @@ export class AuthController {
   async verifyEmail(
     @Query('token') token: string,
   ): Promise<MessageResponseDto> {
-    // FIX: Let exceptions bubble up naturally to preserve clean type safety properties
     await this.authService.verifyEmail(token);
     return { message: 'Email verified successfully' };
   }
