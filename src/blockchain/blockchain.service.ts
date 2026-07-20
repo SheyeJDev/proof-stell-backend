@@ -214,7 +214,10 @@ export class BlockchainService {
         const receipt = await this.provider.getTransactionReceipt(txHash);
         if (receipt) {
           const blockNumber =
-            typeof receipt.value?.block_number === 'number'
+            receipt.value &&
+            typeof receipt.value === 'object' &&
+            'block_number' in receipt.value &&
+            typeof receipt.value.block_number === 'number'
               ? receipt.value.block_number
               : undefined;
 
