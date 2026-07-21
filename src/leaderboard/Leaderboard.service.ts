@@ -13,6 +13,7 @@ import { Cron } from '@nestjs/schedule';
 import { TypedConfigService } from '../common/config/typed-config.service';
 import { NotificationService } from '../notification/notification.service';
 import { RealtimeGateway } from '../common/gateways/realtime.gateway';
+import { IdempotencyService } from '../common/services/idempotency.service';
 import { CacheService } from '../cache/cache.service';
 import { CacheKeys } from '../cache/decorators/cache.decorator';
 
@@ -56,6 +57,7 @@ export class LeaderboardService {
     private readonly notificationService: NotificationService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly cacheService: CacheService,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
   /**
@@ -81,6 +83,15 @@ export class LeaderboardService {
     createLeaderboardDto: CreateLeaderboardDto,
   ): Promise<Leaderboard> {
     const { score } = createLeaderboardDto;
+    const idempotencyKey = this.idempotencyService.generateKey(
+      'submit-score',
+      userId,
+    );
+
+    const cachedResult = await this.idempotencyService.check<Leaderboard>(idempotencyKey);
+    if (cachedResult) {
+      return cachedResult;
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -167,6 +178,7 @@ export class LeaderboardService {
       await this.emitRealtimeLeaderboardUpdate('global', 'score_change');
     }
 
+    await this.idempotencyService.store(idempotencyKey, finalEntry, 600000);
     return finalEntry;
   }
 

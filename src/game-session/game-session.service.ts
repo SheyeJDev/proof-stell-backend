@@ -1,16 +1,15 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { GameSession } from './entities/game-session.entity';
 import { InputEvent } from './entities/input-event.entity';
 import { ReportSessionDto } from './dto/report-session.dto';
 import { StartSessionDto } from './dto/start-session.dto';
+import { User } from '../users/entities/user.entity';
+import { LeaderboardService } from '../leaderboard/Leaderboard.service';
+import { AchievementService } from '../badge/services/achievement.service';
+import { IdempotencyService } from '../common/services/idempotency.service';
+import { SagaBuilder } from '../common/saga/saga.builder';
 import * as crypto from 'crypto';
 
 export interface SessionAnalytics {
@@ -20,66 +19,37 @@ export interface SessionAnalytics {
   averageDuration: number;
 }
 
-/**
- * Service for managing game sessions and input events.
- * 
- * This service handles game session lifecycle including starting sessions,
- * reporting session results with integrity verification, and retrieving
- * session analytics. It uses cryptographic nonces and HMAC signatures
- * to ensure session integrity and prevent cheating.
- * 
- * @example
- * ```typescript
- * const gameSessionService = new GameSessionService(
- *   gameSessionRepository,
- *   inputEventRepository,
- *   dataSource
- * );
- * const { sessionId, nonce } = await gameSessionService.startSession(
- *   'user-id',
- *   { challengeId: 'challenge-123' }
- * );
- * ```
- */
+interface SessionReportContext extends Record<string, any> {
+  queryRunner: import('typeorm').QueryRunner;
+  userId: string;
+  score: number;
+  duration: number;
+  metadata: Record<string, any>;
+  sessionId: string;
+  savedSession: GameSession | null;
+  inputEvents: InputEvent[];
+  previousGamesPlayed: number;
+  previousTotalScore: number;
+  previousHighestScore: number;
+}
+
 @Injectable()
 export class GameSessionService {
   private readonly logger = new Logger(GameSessionService.name);
 
-  /**
-   * Creates a new GameSessionService instance.
-   * 
-   * @param gameSessionRepository - TypeORM repository for GameSession entity
-   * @param inputEventRepository - TypeORM repository for InputEvent entity
-   * @param dataSource - TypeORM data source for transaction management
-   */
   constructor(
     @InjectRepository(GameSession)
     private gameSessionRepository: Repository<GameSession>,
     @InjectRepository(InputEvent)
     private inputEventRepository: Repository<InputEvent>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private dataSource: DataSource,
+    private readonly leaderboardService: LeaderboardService,
+    private readonly achievementService: AchievementService,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
-  /**
-   * Starts a new game session for a user.
-   * 
-   * This method creates a new game session with a cryptographic nonce
-   * for integrity verification. The nonce must be used when reporting
-   * the session results to prevent tampering.
-   * 
-   * @param userId - The ID of the user starting the session
-   * @param dto - Object containing the challenge ID
-   * @returns Promise containing the session ID and nonce
-   * 
-   * @example
-   * ```typescript
-   * const { sessionId, nonce } = await gameSessionService.startSession(
-   *   'user-id',
-   *   { challengeId: 'challenge-123' }
-   * );
-   * // Store nonce securely for later reporting
-   * ```
-   */
   async startSession(
     userId: string,
     dto: StartSessionDto,
@@ -95,100 +65,186 @@ export class GameSessionService {
     return { sessionId: savedSession.id, nonce };
   }
 
-  /**
-   * Reports the results of a completed game session.
-   * 
-   * This method verifies session integrity using HMAC signature,
-   * stores the session results, and batches input events for performance.
-   * The session can only be reported once and must include a valid signature.
-   * 
-   * @param userId - The ID of the user reporting the session
-   * @param reportSessionDto - Object containing session data, inputs, and signature
-   * @returns Promise containing the saved game session
-   * @throws {NotFoundException} If session not found or doesn't belong to user
-   * @throws {BadRequestException} If session already reported or signature invalid
-   * 
-   * @example
-   * ```typescript
-   * const session = await gameSessionService.reportSession('user-id', {
-   *   sessionId: 'session-id',
-   *   challengeId: 'challenge-123',
-   *   score: 100,
-   *   duration: 60,
-   *   inputs: [...],
-   *   signature: 'hmac-signature'
-   * });
-   * ```
-   */
   async reportSession(
     userId: string,
     reportSessionDto: ReportSessionDto,
   ): Promise<GameSession> {
+    const idempotencyKey = this.idempotencyService.generateKey(
+      'report-session',
+      `${userId}:${reportSessionDto.sessionId}`,
+    );
+
+    const cachedResult = await this.idempotencyService.check<GameSession>(idempotencyKey);
+    if (cachedResult) {
+      this.logger.log(`Returning cached session report for user ${userId}`);
+      return cachedResult;
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
+    const ctx: SessionReportContext = {
+      queryRunner,
+      userId,
+      score: reportSessionDto.score,
+      duration: reportSessionDto.duration,
+      metadata: reportSessionDto.metadata || {},
+      sessionId: reportSessionDto.sessionId,
+      savedSession: null,
+      inputEvents: [],
+      previousGamesPlayed: 0,
+      previousTotalScore: 0,
+      previousHighestScore: 0,
+    };
+
     try {
-      const gameSession = await queryRunner.manager.findOne(GameSession, {
-        where: { id: reportSessionDto.sessionId, userId },
-      });
+      await SagaBuilder.create<SessionReportContext>()
+        .step('verify-and-save-session', async (c) => {
+          const gameSession = await c.queryRunner.manager.findOne(GameSession, {
+            where: { id: c.sessionId, userId: c.userId },
+          });
 
-      if (!gameSession) {
-        throw new NotFoundException(
-          'Session not found or does not belong to you',
-        );
-      }
+          if (!gameSession) {
+            throw new NotFoundException(
+              'Session not found or does not belong to you',
+            );
+          }
 
-      if (gameSession.nonceUsedAt) {
-        throw new BadRequestException('Session has already been reported');
-      }
+          if (gameSession.nonceUsedAt) {
+            throw new BadRequestException('Session has already been reported');
+          }
 
-      // Verify session HMAC integrity
-      const calculatedHash = this.calculateSessionHash(
-        gameSession.nonce,
-        reportSessionDto,
-      );
-      if (calculatedHash !== reportSessionDto.signature) {
-        throw new BadRequestException('Session integrity check failed');
-      }
+          const calculatedHash = this.calculateSessionHash(
+            gameSession.nonce,
+            reportSessionDto,
+          );
+          if (calculatedHash !== reportSessionDto.signature) {
+            throw new BadRequestException('Session integrity check failed');
+          }
 
-      // Update game session
-      gameSession.score = reportSessionDto.score;
-      gameSession.duration = reportSessionDto.duration;
-      gameSession.metadata = reportSessionDto.metadata;
-      gameSession.isVerified = true;
-      gameSession.nonceUsedAt = new Date();
+          gameSession.score = c.score;
+          gameSession.duration = c.duration;
+          gameSession.metadata = c.metadata;
+          gameSession.isVerified = true;
+          gameSession.nonceUsedAt = new Date();
 
-      const savedSession = await queryRunner.manager.save(
-        GameSession,
-        gameSession,
-      );
+          c.savedSession = await c.queryRunner.manager.save(
+            GameSession,
+            gameSession,
+          );
+        }, async (c) => {
+          if (c.savedSession) {
+            c.savedSession.isVerified = false;
+            c.savedSession.nonceUsedAt = null;
+            c.savedSession.score = 0;
+            c.savedSession.duration = 0;
+            c.savedSession.metadata = null;
+            await c.queryRunner.manager.save(c.savedSession);
+          }
+        })
+        .step('save-input-events', async (c) => {
+          const batchSize = 1000;
+          const inputBatches = this.chunkArray(reportSessionDto.inputs, batchSize);
 
-      // Create input events in batches for performance
-      const batchSize = 1000;
-      const inputBatches = this.chunkArray(reportSessionDto.inputs, batchSize);
+          for (const batch of inputBatches) {
+            const inputEvents = batch.map((input) =>
+              c.queryRunner.manager.create(InputEvent, {
+                gameSessionId: c.savedSession!.id,
+                eventType: input.eventType,
+                timestamp: input.timestamp,
+                eventData: input.eventData,
+                clientId: input.clientId,
+              }),
+            );
 
-      for (const batch of inputBatches) {
-        const inputEvents = batch.map((input) =>
-          queryRunner.manager.create(InputEvent, {
-            gameSessionId: savedSession.id,
-            eventType: input.eventType,
-            timestamp: input.timestamp,
-            eventData: input.eventData,
-            clientId: input.clientId,
-          }),
-        );
+            await c.queryRunner.manager.save(InputEvent, inputEvents);
+            c.inputEvents.push(...inputEvents);
+          }
+        }, async (c) => {
+          if (c.savedSession?.id) {
+            await c.queryRunner.manager.delete(InputEvent, {
+              gameSessionId: c.savedSession.id,
+            });
+          }
+        })
+        .step('update-user-stats', async (c) => {
+          const user = await c.queryRunner.manager.findOne(User, {
+            where: { id: c.userId },
+          });
 
-        await queryRunner.manager.save(InputEvent, inputEvents);
-      }
+          if (!user) {
+            throw new NotFoundException('User not found');
+          }
+
+          c.previousGamesPlayed = user.gamesPlayed;
+          c.previousTotalScore = user.totalScore;
+          c.previousHighestScore = user.highestScore;
+
+          user.gamesPlayed += 1;
+          user.totalScore += c.score;
+          user.highestScore = Math.max(user.highestScore, c.score);
+
+          await c.queryRunner.manager.save(user);
+        }, async (c) => {
+          if (c.userId) {
+            await c.queryRunner.manager.update(User, c.userId, {
+              gamesPlayed: c.previousGamesPlayed,
+              totalScore: c.previousTotalScore,
+              highestScore: c.previousHighestScore,
+            });
+          }
+        })
+        .step('update-leaderboard', async (c) => {
+          await this.leaderboardService.submitScore(c.userId, { score: c.score });
+        }, async (c) => {
+          try {
+            await this.leaderboardService.submitScore(c.userId, {
+              score: c.previousHighestScore || 0,
+            } as any);
+          } catch {
+            // Ignore compensation errors
+          }
+        })
+        .step('award-badges', async (c) => {
+          const context = {
+            gameId: c.savedSession!.id,
+            score: c.score,
+            duration: c.duration,
+            triggerEvent: 'game_completion',
+          };
+
+          await this.achievementService.checkAndAwardAchievements(
+            c.userId,
+            context,
+            c.queryRunner.manager,
+          );
+        }, async (c) => {
+          try {
+            const badges = await c.queryRunner.manager
+              .createQueryBuilder('ub', 'user_badges')
+              .where('ub.userId = :userId', { userId: c.userId })
+              .andWhere("ub.metadata->>'gameId' = :gameId", { gameId: c.savedSession?.id })
+              .getMany();
+
+            for (const badge of badges) {
+              await c.queryRunner.manager.remove(badge);
+            }
+          } catch {
+            // Ignore compensation errors
+          }
+        })
+        .execute(ctx);
 
       await queryRunner.commitTransaction();
 
       this.logger.log(
-        `Game session reported successfully for user ${userId}, session ${savedSession.id}`,
+        `Game session reported successfully for user ${userId}, session ${ctx.savedSession!.id}`,
       );
 
-      return savedSession;
+      const result = ctx.savedSession!;
+      await this.idempotencyService.store(idempotencyKey, result, 600000);
+      return result;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       const errorMessage =
@@ -203,29 +259,6 @@ export class GameSessionService {
     }
   }
 
-  /**
-   * Retrieves game sessions for a specific user.
-   * 
-   * This method returns paginated game sessions for a user. Users can
-   * only access their own sessions unless they have admin role.
-   * 
-   * @param userId - The ID of the user to fetch sessions for
-   * @param requestingUser - The user making the request (for authorization)
-   * @param limit - Maximum number of sessions to return (default: 50)
-   * @param offset - Number of sessions to skip (default: 0)
-   * @returns Promise containing sessions array and total count
-   * @throws {ForbiddenException} If user tries to access another user's sessions
-   * 
-   * @example
-   * ```typescript
-   * const { sessions, total } = await gameSessionService.findSessionsByUser(
-   *   'user-id',
-   *   { id: 'user-id', role: 'user' },
-   *   50,
-   *   0
-   * );
-   * ```
-   */
   async findSessionsByUser(
     userId: string,
     requestingUser: { id: string; role: string },
@@ -236,7 +269,6 @@ export class GameSessionService {
       throw new ForbiddenException('You can only access your own sessions');
     }
 
-    // Avoid eager loading of large relations by default. Load only summary fields for listing.
     const [sessions, total] = await this.gameSessionRepository
       .createQueryBuilder('gs')
       .select([
@@ -256,21 +288,6 @@ export class GameSessionService {
     return { sessions, total };
   }
 
-  /**
-   * Retrieves a specific game session by ID.
-   * 
-   * This method returns complete session data including user, challenge,
-   * and input event relations.
-   * 
-   * @param sessionId - The ID of the session to retrieve
-   * @returns Promise containing the game session
-   * @throws {NotFoundException} If session with the specified ID does not exist
-   * 
-   * @example
-   * ```typescript
-   * const session = await gameSessionService.findSessionById('session-id');
-   * ```
-   */
   async findSessionById(sessionId: string): Promise<GameSession> {
     const session = await this.gameSessionRepository.findOne({
       where: { id: sessionId },
@@ -284,26 +301,6 @@ export class GameSessionService {
     return session;
   }
 
-  /**
-   * Retrieves analytics for game sessions.
-   * 
-   * This method calculates aggregate statistics for game sessions,
-   * optionally filtered by user or challenge. Returns total sessions,
-   * average score, highest score, and average duration.
-   * 
-   * @param userId - Optional user ID to filter by
-   * @param challengeId - Optional challenge ID to filter by
-   * @returns Promise containing session analytics
-   * 
-   * @example
-   * ```typescript
-   * const analytics = await gameSessionService.getSessionAnalytics(
-   *   'user-id',
-   *   'challenge-123'
-   * );
-   * console.log(`Average score: ${analytics.averageScore}`);
-   * ```
-   */
   async getSessionAnalytics(
     userId?: string,
     challengeId?: string,
@@ -335,17 +332,6 @@ export class GameSessionService {
     return analytics as SessionAnalytics;
   }
 
-  /**
-   * Calculates the HMAC signature for session integrity verification.
-   * 
-   * This private method creates a cryptographic signature using the
-   * session nonce and key session data to prevent tampering.
-   * 
-   * @param nonce - The cryptographic nonce from session start
-   * @param sessionData - The session data to sign
-   * @returns The HMAC signature as a hex string
-   * @private
-   */
   private calculateSessionHash(
     nonce: string,
     sessionData: ReportSessionDto,
@@ -369,17 +355,6 @@ export class GameSessionService {
       .digest('hex');
   }
 
-  /**
-   * Splits an array into chunks of specified size.
-   * 
-   * This private method is used for batching input events
-   * to improve database insertion performance.
-   * 
-   * @param array - The array to chunk
-   * @param size - The size of each chunk
-   * @returns Array of chunks
-   * @private
-   */
   private chunkArray<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];
     for (let i = 0; i < array.length; i += size) {

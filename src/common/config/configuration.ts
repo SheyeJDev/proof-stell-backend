@@ -43,6 +43,10 @@ export default registerAs('app', () => ({
   starknetPrivateKey: process.env.STARKNET_PRIVATE_KEY,
   starknetAccountAddress: process.env.STARKNET_ACCOUNT_ADDRESS,
   mintContractAddress: process.env.MINT_CONTRACT_ADDRESS,
+  blockchainReceiptTimeoutMs: parseInt(
+    process.env.BLOCKCHAIN_RECEIPT_TIMEOUT_MS || '120000',
+    10,
+  ),
   allowedOrigins: process.env.ALLOWED_ORIGINS || 'http://localhost:3000',
   corsEnabled: process.env.CORS_ENABLED !== 'false',
   // Notification delivery configuration

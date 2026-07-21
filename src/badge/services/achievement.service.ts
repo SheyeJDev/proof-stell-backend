@@ -1,41 +1,67 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Repository } from 'typeorm';
-import { type Badge, AchievementType } from '../entities/badge.entity';
-import type { UserBadge } from '../entities/user-badge.entity';
-import type { User } from '../../users/entities/user.entity';
-import { type Game, GameStatus } from '../../game/entities/game.entity';
+import type { Repository, EntityManager } from 'typeorm';
+import { Badge, AchievementType } from '../entities/badge.entity';
+import { User } from '../../users/entities/user.entity';
+import { Game, GameStatus } from '../../game/entities/game.entity';
 import { NotificationService } from '../../notification/notification.service';
+import { UserBadge } from '../entities/user-badge.entity';
+
+interface Repositories {
+  user: Repository<User>;
+  badge: Repository<Badge>;
+  userBadge: Repository<UserBadge>;
+  game: Repository<Game>;
+}
 
 @Injectable()
 export class AchievementService {
   private readonly logger = new Logger(AchievementService.name);
 
   constructor(
-    private badgeRepository: Repository<Badge>,
-    private userBadgeRepository: Repository<UserBadge>,
-    private userRepository: Repository<User>,
-    private gameRepository: Repository<Game>,
-    private notificationService: NotificationService,
+    private readonly userRepository: Repository<User>,
+    private readonly userBadgeRepository: Repository<UserBadge>,
+    private readonly badgeRepository: Repository<Badge>,
+    private readonly gameRepository: Repository<Game>,
+    private readonly notificationService: NotificationService,
   ) {}
+
+  private resolveRepos(manager?: EntityManager | null): Repositories {
+    if (!manager) {
+      return {
+        user: this.userRepository,
+        badge: this.badgeRepository,
+        userBadge: this.userBadgeRepository,
+        game: this.gameRepository,
+      };
+    }
+    return {
+      user: manager.getRepository(User),
+      badge: manager.getRepository(Badge),
+      userBadge: manager.getRepository(UserBadge),
+      game: manager.getRepository(Game),
+    };
+  }
 
   async checkAndAwardAchievements(
     userId: string,
     context?: any,
+    manager?: EntityManager | null,
   ): Promise<UserBadge[]> {
-    const user = await this.userRepository.findOne({ where: { id: userId } });
+    const repo = this.resolveRepos(manager);
+    const user = await repo.user.findOne({ where: { id: userId } });
     if (!user) {
       this.logger.warn(`User ${userId} not found for achievement check`);
       return [];
     }
 
-    const autoAwardedBadges = await this.badgeRepository.find({
+    const autoAwardedBadges = await repo.badge.find({
       where: { isAutoAwarded: true, isActive: true },
     });
 
     const newlyAwardedBadges: UserBadge[] = [];
 
     for (const badge of autoAwardedBadges) {
-      const hasAlready = await this.userBadgeRepository.findOne({
+      const hasAlready = await repo.userBadge.findOne({
         where: { userId, badgeId: badge.id },
       });
 
@@ -44,10 +70,10 @@ export class AchievementService {
           userId,
           badge.id,
           context,
+          manager,
         );
         newlyAwardedBadges.push(userBadge);
         this.logger.log(`Awarded badge "${badge.name}" to user ${userId}`);
-        // Send notification for reward unlock
         await this.notificationService.create({
           userIds: [userId],
           title: 'Reward Unlocked!',
@@ -171,7 +197,8 @@ export class AchievementService {
     userId: string,
     requiredWins: number,
   ): Promise<boolean> {
-    const recentGames = await this.gameRepository.find({
+    const repo = this.resolveRepos(null);
+    const recentGames = await repo.game.find({
       where: { userId, status: GameStatus.COMPLETED },
       order: { createdAt: 'DESC' },
       take: requiredWins,
@@ -179,7 +206,6 @@ export class AchievementService {
 
     if (recentGames.length < requiredWins) return false;
 
-    // Check if all recent games are wins (assuming win condition)
     return recentGames.every((game) => this.isGameWin(game));
   }
 
@@ -229,7 +255,8 @@ export class AchievementService {
     userId: string,
     improvementPercentage: number,
   ): Promise<boolean> {
-    const recentGames = await this.gameRepository.find({
+    const repo = this.resolveRepos(null);
+    const recentGames = await repo.game.find({
       where: { userId, status: GameStatus.COMPLETED },
       order: { createdAt: 'DESC' },
       take: 10,
@@ -248,8 +275,6 @@ export class AchievementService {
   }
 
   private isGameWin(game: Game): boolean {
-    // Define win condition based on your game logic
-    // This is a simple example - adjust based on your requirements
     if (game.maxPossibleScore > 0) {
       return game.score >= game.maxPossibleScore * 0.7;
     }
@@ -260,8 +285,10 @@ export class AchievementService {
     userId: string,
     badgeId: string,
     context?: any,
+    manager?: EntityManager | null,
   ): Promise<UserBadge> {
-    const userBadge = this.userBadgeRepository.create({
+    const repo = this.resolveRepos(manager);
+    const userBadge = repo.userBadge.create({
       userId,
       badgeId,
       isManuallyAwarded: false,
@@ -281,13 +308,12 @@ export class AchievementService {
       isDisplayed: true,
     } as any);
 
-    const saved = await this.userBadgeRepository.save(userBadge);
+    const saved = await repo.userBadge.save(userBadge);
     return Array.isArray(saved) ? saved[0] : saved;
   }
 
   async initializeDefaultBadges(): Promise<void> {
     const defaultBadges = [
-      // Gameplay Achievements
       {
         name: 'First Steps',
         description: 'Complete your first game',
@@ -334,8 +360,6 @@ export class AchievementService {
         rarity: 'rare',
         category: 'Speed',
       },
-
-      // Milestone Achievements
       {
         name: 'Dedicated Player',
         description: 'Play 10 games',
@@ -368,8 +392,6 @@ export class AchievementService {
         rarity: 'epic',
         category: 'Milestones',
       },
-
-      // Social Achievements
       {
         name: 'Social Butterfly',
         description: 'Refer 5 friends to the platform',
@@ -392,8 +414,6 @@ export class AchievementService {
         rarity: 'legendary',
         category: 'Social',
       },
-
-      // Streak Achievements
       {
         name: 'On Fire',
         description: 'Win 5 games in a row',
@@ -416,8 +436,6 @@ export class AchievementService {
         rarity: 'legendary',
         category: 'Streaks',
       },
-
-      // Special Achievements
       {
         name: 'Beta Tester',
         description: 'Special recognition for beta testing',
