@@ -10,6 +10,7 @@ import {
   Min,
   Max,
   ArrayMaxSize,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { InputEventType } from '../entities/input-event.entity';
@@ -20,6 +21,7 @@ export class InputEventDto {
 
   @IsNumber()
   @Min(0)
+  @Max(3_600_000) // Max 1 hour in ms
   timestamp: number;
 
   @IsObject()
@@ -34,6 +36,7 @@ export class InputEventDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64) // Cap clientId length to prevent oversized strings
   clientId?: string;
 }
 
@@ -43,18 +46,23 @@ export class ReportSessionDto {
 
   @IsNumber()
   @Min(0)
-  @Max(1000000) // Prevent absurd score spoofing
+  @Max(1_000_000) // Prevent absurd score spoofing
   score: number;
 
   @IsNumber()
   @Min(0)
-  @Max(3600000) // Max 1 hour
+  @Max(3_600_000) // Max 1 hour in ms
   duration: number;
 
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => InputEventDto)
-  @ArrayMaxSize(10000) // Prevent abuse
+  /**
+   * Hard cap at 1000 input events per batch submission.
+   * Prevents DoS via unbounded large arrays.
+   * Was 10_000 — reduced as per security requirements.
+   */
+  @ArrayMaxSize(1000)
   inputs: InputEventDto[];
 
   @IsOptional()
@@ -65,5 +73,6 @@ export class ReportSessionDto {
   sessionId: string;
 
   @IsString()
-  signature: string; // HMAC-SHA256 signature
+  @MaxLength(128) // HMAC-SHA256 hex is 64 chars; 128 gives headroom while capping DoS
+  signature: string;
 }

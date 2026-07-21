@@ -184,3 +184,73 @@ redis-cli -h $REDIS_HOST -p $REDIS_PORT DEL "leaderboard:global:top100"
 ## Health Probe
 
 `GET /api/v1/health` — returns 200 when all dependencies are up, 503 otherwise. Use this as a Kubernetes liveness/readiness probe.
+
+
+---
+
+## JWT Secret Rotation
+
+### Overview
+
+JWT tokens are signed with `JWT_SECRET`. If this secret is compromised, all existing tokens must be invalidated immediately. The app supports a versioned key rotation strategy to allow a zero-downtime rotation window.
+
+### Key Versioning
+
+To support gradual rotation without immediately invalidating all active sessions:
+
+1. **Add a new secret variable** alongside the existing one:
+   - `JWT_SECRET` — current signing key (used to sign new tokens)
+   - `JWT_SECRET_PREVIOUS` — previous signing key (accepted for verification until the rotation window expires)
+
+2. **Update `JwtModule` configuration** in `src/auth/auth.module.ts` to verify tokens against both keys:
+   ```typescript
+   // Pseudocode — adapt to your jwt.strategy.ts verify logic
+   const verifySecret = (token: string) => {
+     try {
+       return jwt.verify(token, process.env.JWT_SECRET);
+     } catch {
+       // Fallback to previous key during rotation window
+       return jwt.verify(token, process.env.JWT_SECRET_PREVIOUS);
+     }
+   };
+   ```
+
+3. **Set a rotation window** — run both secrets in parallel for the duration of `JWT_ACCESS_TTL` (default 15 minutes). After the window expires, remove `JWT_SECRET_PREVIOUS`.
+
+### Step-by-Step Rotation Procedure
+
+```bash
+# 1. Generate a new secret (minimum 32 characters, cryptographically random)
+NEW_SECRET=$(openssl rand -hex 32)
+
+# 2. In your secrets manager / environment config:
+#    - Set JWT_SECRET_PREVIOUS = current value of JWT_SECRET
+#    - Set JWT_SECRET = $NEW_SECRET
+
+# 3. Deploy the updated environment config (rolling deploy recommended)
+
+# 4. Wait for JWT_ACCESS_TTL (default 15 minutes) — all old tokens will expire
+#    or be re-issued using the new secret
+
+# 5. After the rotation window: remove JWT_SECRET_PREVIOUS from config
+
+# 6. Deploy again to remove the previous-key fallback
+```
+
+### Emergency Rotation (Secret Compromise)
+
+If `JWT_SECRET` is confirmed compromised:
+
+1. **Immediately** set `JWT_SECRET` to a new value and deploy — this invalidates **all** active tokens.
+2. Clear the token revocation blacklist in Redis if populated (`redis-cli DEL jwt:blacklist:*`).
+3. Notify users that all sessions have been terminated and they must log in again.
+4. Audit `JwtSecurityService` logs for suspicious token usage before the rotation.
+
+### Rotation Checklist
+
+- [ ] New secret is at least 32 characters and generated from a CSPRNG
+- [ ] `JWT_SECRET_PREVIOUS` set and deployed before changing `JWT_SECRET`
+- [ ] Verified token verification falls back to previous key correctly
+- [ ] Rotation window (= `JWT_ACCESS_TTL`) has elapsed before removing `JWT_SECRET_PREVIOUS`
+- [ ] Alert rules updated to detect unusual 401 spike post-rotation
+- [ ] Rotation event logged in audit trail
