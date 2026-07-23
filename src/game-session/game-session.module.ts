@@ -10,6 +10,7 @@ import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 import { BadgeModule } from '../badge/badge.module';
 import { IdempotencyModule } from '../common/idempotency/idempotency.module';
 import { SagaModule } from '../common/saga/saga.module';
+import { CacheModule } from '../cache/cache.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SagaModule } from '../common/saga/saga.module';
     BadgeModule,
     IdempotencyModule,
     SagaModule,
+    CacheModule,
   ],
   controllers: [GameSessionController],
   providers: [GameSessionService, SessionIntegrityGuard],

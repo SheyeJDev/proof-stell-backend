@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CacheService } from './cache.service';
 import { Logger } from '@nestjs/common';
+import { DistributedLockService } from './distributed-lock.service';
 
 describe('CacheService', () => {
   let service: CacheService;
@@ -14,6 +15,11 @@ describe('CacheService', () => {
     reset: jest.fn(),
   };
 
+  const mockDistributedLockService = {
+    acquire: jest.fn(),
+    release: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -21,6 +27,10 @@ describe('CacheService', () => {
         {
           provide: CACHE_MANAGER,
           useValue: mockCacheManager,
+        },
+        {
+          provide: DistributedLockService,
+          useValue: mockDistributedLockService,
         },
       ],
     }).compile();
@@ -201,4 +211,91 @@ describe('CacheService', () => {
       expect(stats.totalRequests).toBe(0);
     });
   });
+
+  describe('acquireLock', () => {
+    it('should acquire lock via DistributedLockService', async () => {
+      const lock = { key: 'test:lock', token: 'token-123' };
+      mockDistributedLockService.acquire.mockResolvedValue(lock);
+
+      const result = await service.acquireLock('test:lock', 30000, 3);
+
+      expect(result).toEqual(lock);
+      expect(mockDistributedLockService.acquire).toHaveBeenCalledWith('test:lock', 30000);
+    });
+
+    it('should retry acquiring lock up to the specified retries', async () => {
+      mockDistributedLockService.acquire
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ key: 'test:lock', token: 'token' });
+
+      const result = await service.acquireLock('test:lock', 30000, 2);
+
+      expect(result).toEqual({ key: 'test:lock', token: 'token' });
+      expect(mockDistributedLockService.acquire).toHaveBeenCalledTimes(3);
+    });
+
+    it('should return null after all retries are exhausted', async () => {
+      mockDistributedLockService.acquire.mockResolvedValue(null);
+
+      const result = await service.acquireLock('test:lock', 30000, 2);
+
+      expect(result).toBeNull();
+      expect(mockDistributedLockService.acquire).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('releaseLock', () => {
+    it('should delegate to DistributedLockService.release for a valid lock', async () => {
+      const lock = { key: 'test:lock', token: 'token-123' };
+      mockDistributedLockService.release.mockResolvedValue(true);
+
+      const result = await service.releaseLock(lock);
+
+      expect(result).toBe(true);
+      expect(mockDistributedLockService.release).toHaveBeenCalledWith(lock);
+    });
+
+    it('should return false for null lock', async () => {
+      const result = await service.releaseLock(null);
+      expect(result).toBe(false);
+      expect(mockDistributedLockService.release).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('withLock', () => {
+    it('should execute callback when lock is acquired', async () => {
+      const lock = { key: 'test:lock', token: 'token-123' };
+      mockDistributedLockService.acquire.mockResolvedValue(lock);
+      const callback = jest.fn().mockResolvedValue('result-value');
+
+      const result = await service.withLock('test:lock', 30000, callback);
+
+      expect(result).toBe('result-value');
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockDistributedLockService.release).toHaveBeenCalledWith(lock);
+    });
+
+    it('should return null and not execute callback when lock is not acquired', async () => {
+      mockDistributedLockService.acquire.mockResolvedValue(null);
+      const callback = jest.fn();
+
+      const result = await service.withLock('test:lock', 30000, callback);
+
+      expect(result).toBeNull();
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('should release lock even when callback throws', async () => {
+      const lock = { key: 'test:lock', token: 'token-123' };
+      mockDistributedLockService.acquire.mockResolvedValue(lock);
+      const error = new Error('work failed');
+      const callback = jest.fn().mockRejectedValue(error);
+
+      await expect(service.withLock('test:lock', 30000, callback)).rejects.toThrow(error);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockDistributedLockService.release).toHaveBeenCalledWith(lock);
+    });
+  });
 });
+

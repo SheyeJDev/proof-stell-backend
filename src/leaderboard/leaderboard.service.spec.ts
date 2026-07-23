@@ -50,7 +50,10 @@ const mockConfigService = {
 
 const mockNotificationService = { create: jest.fn() };
 
-const mockCacheService = { del: jest.fn() };
+const mockCacheService = { 
+  del: jest.fn(),
+  withLock: jest.fn().mockImplementation((_key, _ttl, callback) => callback()),
+};
 
 describe('LeaderboardService', () => {
   let service: LeaderboardService;

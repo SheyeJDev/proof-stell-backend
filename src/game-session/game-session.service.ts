@@ -10,6 +10,7 @@ import { LeaderboardService } from '../leaderboard/Leaderboard.service';
 import { AchievementService } from '../badge/services/achievement.service';
 import { IdempotencyService } from '../common/services/idempotency.service';
 import { SagaBuilder } from '../common/saga/saga.builder';
+import { CacheService } from '../cache/cache.service';
 import * as crypto from 'crypto';
 
 export interface SessionAnalytics {
@@ -48,6 +49,7 @@ export class GameSessionService {
     private readonly leaderboardService: LeaderboardService,
     private readonly achievementService: AchievementService,
     private readonly idempotencyService: IdempotencyService,
+    private readonly cacheService: CacheService,
   ) {}
 
   async startSession(
@@ -196,7 +198,16 @@ export class GameSessionService {
           }
         })
         .step('update-leaderboard', async (c) => {
-          await this.leaderboardService.submitScore(c.userId, { score: c.score });
+          const lockKey = `leaderboard:user:${c.userId}`;
+          const acquired = await this.cacheService.acquireLock(lockKey, 30000, 3);
+          if (!acquired) {
+            throw new Error(`Could not acquire leaderboard update lock for user ${c.userId}`);
+          }
+          try {
+            await this.leaderboardService.submitScore(c.userId, { score: c.score });
+          } finally {
+            await this.cacheService.releaseLock(acquired);
+          }
         }, async (c) => {
           try {
             await this.leaderboardService.submitScore(c.userId, {

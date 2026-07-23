@@ -41,6 +41,12 @@ export class CacheKeys {
   static readonly TODAY_CHALLENGE = 'challenge:today:{date}';
   static readonly USER_BADGES = 'badges:user:{userId}';
   static readonly AVAILABLE_BADGES = 'badges:available';
+  static readonly BLOCKCHAIN_MINT = 'blockchain:mint:{userId}';
+  static readonly BLOCKCHAIN_TRANSFER = 'blockchain:transfer:{fromUserId}:{toUserId}';
+  static readonly BLOCKCHAIN_BURN = 'blockchain:burn:{userId}';
+  static readonly WALLET_TRANSACTION = 'wallet:transaction:{userId}';
+  static readonly LEADERBOARD_UPDATE = 'leaderboard:user:{userId}';
+  static readonly LEADERBOARD_RECALCULATE = 'leaderboard:recalculate';
 
   /**
    * Build cache key by replacing placeholders with actual values

@@ -67,4 +67,20 @@ describe('MetricsService', () => {
 
   describe('getActiveUsers', () => {
     it('should return cached data if available', async () => {
-      
+      cacheManager.get.mockResolvedValue({ count: 42 });
+      const result = await service.getActiveUsers();
+      expect(result).toEqual({ count: 42 });
+      expect(cacheManager.get).toHaveBeenCalled();
+    });
+
+    it('should query database when cache is empty', async () => {
+      cacheManager.get.mockResolvedValue(undefined);
+      mockUserRepository.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(10),
+      });
+      const result = await service.getActiveUsers();
+      expect(result.count).toBe(10);
+    });
+  });
+});
