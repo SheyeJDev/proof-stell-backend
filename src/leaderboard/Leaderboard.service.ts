@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -39,6 +40,7 @@ import { CacheKeys } from '../cache/decorators/cache.decorator';
  */
 @Injectable()
 export class LeaderboardService {
+  private readonly logger = new Logger(LeaderboardService.name);
   /**
    * Creates a new LeaderboardService instance.
    * 
@@ -88,11 +90,26 @@ export class LeaderboardService {
       userId,
     );
 
-    const cachedResult = await this.idempotencyService.check<Leaderboard>(idempotencyKey);
-    if (cachedResult) {
-      return cachedResult;
-    }
+    const lockKey = CacheKeys.build(CacheKeys.LEADERBOARD_UPDATE, { userId });
+    const result = await this.cacheService.withLock(lockKey, 30000, async () => {
+      const cachedResult = await this.idempotencyService.check<Leaderboard>(idempotencyKey);
+      if (cachedResult) {
+        return cachedResult;
+      }
+      return this.submitScoreWithTransaction(userId, score, idempotencyKey);
+    });
 
+    if (!result) {
+      throw new Error(`Could not acquire leaderboard update lock for user ${userId} after retries`);
+    }
+    return result;
+  }
+
+  private async submitScoreWithTransaction(
+    userId: string,
+    score: number,
+    idempotencyKey: string,
+  ): Promise<Leaderboard> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -130,7 +147,9 @@ export class LeaderboardService {
 
       // Recalculate ranks within the same transaction using SQL window function
       if (this.configService.leaderboardRecalculationStrategy !== 'batch') {
-        await this.recalculateRanksWithManager(queryRunner.manager);
+        await this.cacheService.withLock('leaderboard:recalculate', 30000, async () => {
+          await this.recalculateRanksWithManager(queryRunner.manager);
+        });
       }
 
       finalEntry = await queryRunner.manager.findOneOrFail(Leaderboard, {
@@ -283,8 +302,10 @@ export class LeaderboardService {
   // Batched rank recalculation every 5 minutes
   @Cron('*/5 * * * *')
   public async recalculateRanks(): Promise<void> {
-    await this.recalculateRanksWithManager(this.dataSource.manager);
-    await this.invalidateGlobalLeaderboardCache();
+    await this.cacheService.withLock('leaderboard:recalculate', 30000, async () => {
+      await this.recalculateRanksWithManager(this.dataSource.manager);
+      await this.invalidateGlobalLeaderboardCache();
+    });
   }
 
   /**

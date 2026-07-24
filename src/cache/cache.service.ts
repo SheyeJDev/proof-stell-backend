@@ -1,6 +1,8 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import { DistributedLockService } from './distributed-lock.service';
+import { AcquiredLock } from './distributed-lock.service';
 
 /**
  * Service for managing cache operations with Redis backend.
@@ -34,7 +36,10 @@ export class CacheService {
    * 
    * @param cacheManager - The cache-manager instance (configured for Redis or memory)
    */
-  constructor(@Inject(CACHE_MANAGER) private readonly cacheManager: Cache) {}
+  constructor(
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly distributedLockService: DistributedLockService,
+  ) {}
 
   /**
    * Retrieves a value from the cache.
@@ -194,6 +199,102 @@ export class CacheService {
       await redisClient.del(key);
     }
     this.logger.debug(`Cache entry deleted for key: ${key}`);
+  }
+
+  /**
+   * Attempts to acquire a distributed lock for the given key.
+   * 
+   * This method wraps the Redis-based distributed lock with retry logic
+   * to handle concurrent acquisition attempts. If the lock cannot be
+   * acquired after the specified number of retries, null is returned.
+   * 
+   * @param key - The lock key to acquire
+   * @param ttl - Time-to-live in milliseconds (default: 30000)
+   * @param retries - Number of retry attempts (default: 3)
+   * @returns Promise containing the acquired lock handle or null
+   * 
+   * @example
+   * ```typescript
+   * const lock = await cacheService.acquireLock('leaderboard:recalculate', 30000, 3);
+   * if (!lock) {
+   *   console.log('Could not acquire lock');
+   *   return;
+   * }
+   * try {
+   *   // Critical section
+   * } finally {
+   *   await cacheService.releaseLock(lock);
+   * }
+   * ```
+   */
+  async acquireLock(key: string, ttl: number = 30000, retries = 3): Promise<AcquiredLock | null> {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const lock = await this.distributedLockService.acquire(key, ttl);
+      if (lock) {
+        return lock;
+      }
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+    this.logger.warn(`Failed to acquire lock '${key}' after ${retries + 1} attempts`);
+    return null;
+  }
+
+  /**
+   * Releases a previously acquired distributed lock.
+   * 
+   * This method safely releases a lock using an atomic Lua script to
+   * prevent releasing a lock that has been re-acquired by another instance.
+   * 
+   * @param lock - The lock handle returned from acquireLock
+   * @returns Promise containing true if the lock was released, false otherwise
+   * 
+   * @example
+   * ```typescript
+   * const released = await cacheService.releaseLock(lock);
+   * ```
+   */
+  async releaseLock(lock: AcquiredLock | null | undefined): Promise<boolean> {
+    if (!lock) {
+      return false;
+    }
+    return this.distributedLockService.release(lock);
+  }
+
+  /**
+   * Executes a callback while holding a distributed lock.
+   * 
+   * This helper acquires a lock, runs the provided callback, and releases
+   * the lock in a finally block. Returns null if the lock cannot be acquired.
+   * 
+   * @param key - The lock key to acquire
+   * @param ttl - Time-to-live in milliseconds
+   * @param callback - The async callback to execute while holding the lock
+   * @returns Promise containing the callback result or null if lock not acquired
+   * 
+   * @example
+   * ```typescript
+   * const result = await cacheService.withLock('leaderboard:recalculate', 30000, async () => {
+   *   await recalculateRanks();
+   *   return 'done';
+   * });
+   * if (!result) {
+   *   console.log('Recalculation skipped: lock not acquired');
+   * }
+   * ```
+   */
+  async withLock<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T | null> {
+    const lock = await this.acquireLock(key, ttl);
+    if (!lock) {
+      this.logger.debug(`Skipping work for lock '${key}'; not acquired.`);
+      return null;
+    }
+    try {
+      return await callback();
+    } finally {
+      await this.releaseLock(lock);
+    }
   }
 
   /**

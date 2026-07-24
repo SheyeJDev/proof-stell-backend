@@ -3,6 +3,7 @@ import { BlockchainService } from './blockchain.service';
 import { TypedConfigService } from '../common/config/typed-config.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AnalyticsEvent } from '../analytics/analytics-event.enum';
+import { CacheService } from '../cache/cache.service';
 
 const mockAccount = {
   execute: jest.fn(),
@@ -15,6 +16,12 @@ const mockConfigService = {
 };
 const mockAnalyticsService = {
   track: jest.fn(),
+};
+const mockCacheService = {
+  get: jest.fn(),
+  set: jest.fn(),
+  acquireLock: jest.fn(),
+  releaseLock: jest.fn(),
 };
 
 jest.mock('starknet', () => ({
@@ -35,6 +42,7 @@ describe('BlockchainService', () => {
         BlockchainService,
         { provide: TypedConfigService, useValue: mockConfigService },
         { provide: AnalyticsService, useValue: mockAnalyticsService },
+        { provide: CacheService, useValue: mockCacheService },
       ],
     }).compile();
 
@@ -47,7 +55,12 @@ describe('BlockchainService', () => {
 
   it('should mint tokens and track analytics', async () => {
     mockAccount.execute.mockResolvedValue({ transaction_hash: '0xhash' });
+    mockCacheService.get.mockResolvedValue(undefined);
+    mockCacheService.acquireLock.mockResolvedValue({ key: 'blockchain:tx:mint:1', token: 'token' });
+    mockCacheService.releaseLock.mockResolvedValue(true);
+
     const result = await service.sendMintTx(1);
+
     expect(mockAccount.execute).toHaveBeenCalledWith({
       contractAddress: '0x123',
       entrypoint: 'mint',
@@ -60,9 +73,21 @@ describe('BlockchainService', () => {
     expect(result).toEqual({ transaction_hash: '0xhash' });
   });
 
+  it('should return cached mint transaction hash when present', async () => {
+    mockCacheService.get.mockResolvedValue({ transaction_hash: '0xcached' });
+    const result = await service.sendMintTx(1);
+    expect(result).toEqual({ transaction_hash: '0xcached' });
+    expect(mockAccount.execute).not.toHaveBeenCalled();
+  });
+
   it('should transfer tokens and track analytics', async () => {
-    mockAccount.execute.mockResolvedValue({ transaction_hash: '0xhash2' });
+    mockAccount.execute.mockResolvedValue({ transaction_hash: '0xtransfer' });
+    mockCacheService.get.mockResolvedValue(undefined);
+    mockCacheService.acquireLock.mockResolvedValue({ key: 'blockchain:tx:transfer:1:2', token: 'token' });
+    mockCacheService.releaseLock.mockResolvedValue(true);
+
     const result = await service.sendTransferTx(1, 2, 50);
+
     expect(mockAccount.execute).toHaveBeenCalledWith({
       contractAddress: '0x123',
       entrypoint: 'transfer',
@@ -72,15 +97,27 @@ describe('BlockchainService', () => {
       AnalyticsEvent.TokenTransferred,
       {
         userId: '1',
-        metadata: { toUserId: 2, amount: 50, transaction_hash: '0xhash2' },
+        metadata: { toUserId: 2, amount: 50, transaction_hash: '0xtransfer' },
       },
     );
-    expect(result).toEqual({ transaction_hash: '0xhash2' });
+    expect(result).toEqual({ transaction_hash: '0xtransfer' });
+  });
+
+  it('should return cached transfer transaction hash when present', async () => {
+    mockCacheService.get.mockResolvedValue({ transaction_hash: '0xcached-transfer' });
+    const result = await service.sendTransferTx(1, 2, 50);
+    expect(result).toEqual({ transaction_hash: '0xcached-transfer' });
+    expect(mockAccount.execute).not.toHaveBeenCalled();
   });
 
   it('should burn tokens and track analytics', async () => {
-    mockAccount.execute.mockResolvedValue({ transaction_hash: '0xhash3' });
+    mockAccount.execute.mockResolvedValue({ transaction_hash: '0xburn' });
+    mockCacheService.get.mockResolvedValue(undefined);
+    mockCacheService.acquireLock.mockResolvedValue({ key: 'blockchain:tx:burn:1', token: 'token' });
+    mockCacheService.releaseLock.mockResolvedValue(true);
+
     const result = await service.sendBurnTx(1, 25);
+
     expect(mockAccount.execute).toHaveBeenCalledWith({
       contractAddress: '0x123',
       entrypoint: 'burn',
@@ -88,9 +125,16 @@ describe('BlockchainService', () => {
     });
     expect(mockAnalyticsService.track).toHaveBeenCalledWith(
       AnalyticsEvent.TokenBurned,
-      { userId: '1', metadata: { amount: 25, transaction_hash: '0xhash3' } },
+      { userId: '1', metadata: { amount: 25, transaction_hash: '0xburn' } },
     );
-    expect(result).toEqual({ transaction_hash: '0xhash3' });
+    expect(result).toEqual({ transaction_hash: '0xburn' });
+  });
+
+  it('should return cached burn transaction hash when present', async () => {
+    mockCacheService.get.mockResolvedValue({ transaction_hash: '0xcached-burn' });
+    const result = await service.sendBurnTx(1, 25);
+    expect(result).toEqual({ transaction_hash: '0xcached-burn' });
+    expect(mockAccount.execute).not.toHaveBeenCalled();
   });
 
   it('should get balance', async () => {

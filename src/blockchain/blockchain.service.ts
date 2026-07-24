@@ -1,8 +1,9 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, forwardRef, Logger } from '@nestjs/common';
 import { Provider, Account, Contract } from 'starknet';
 import { TypedConfigService } from '../common/config/typed-config.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AnalyticsEvent } from '../analytics/analytics-event.enum';
+import { CacheService } from '../cache/cache.service';
 
 /**
  * Service for interacting with the StarkNet blockchain.
@@ -22,6 +23,7 @@ import { AnalyticsEvent } from '../analytics/analytics-event.enum';
 export class BlockchainService {
   private provider: Provider;
   private account: Account;
+  private readonly logger = new Logger(BlockchainService.name);
 
   /**
    * Creates a new BlockchainService instance.
@@ -35,6 +37,7 @@ export class BlockchainService {
     private readonly configService: TypedConfigService,
     @Inject(forwardRef(() => AnalyticsService))
     private readonly analyticsService: AnalyticsService,
+    private readonly cacheService: CacheService,
   ) {
     this.provider = new Provider({
       nodeUrl: 'https://starknet-goerli.g.alchemy.com/v2/demo',
@@ -75,11 +78,13 @@ export class BlockchainService {
    * Sends a mint transaction to the blockchain.
    * 
    * This method executes a mint operation on the configured contract,
-   * minting tokens for the specified user ID.
+   * minting tokens for the specified user ID. It uses idempotency caching
+   * and distributed locking to prevent duplicate transactions.
    * 
    * @param userId - The ID of the user to mint tokens for
+   * @param idempotencyKey - Optional custom idempotency key (defaults to blockchain:mint:${userId})
    * @returns Promise containing the transaction hash
-   * @throws {Error} If the transaction fails or the contract is unreachable
+   * @throws {Error} If the transaction fails, the contract is unreachable, or lock cannot be acquired
    * 
    * @example
    * ```typescript
@@ -87,33 +92,66 @@ export class BlockchainService {
    * console.log('Mint transaction:', result.transaction_hash);
    * ```
    */
-  async sendMintTx(userId: number): Promise<{ transaction_hash: string }> {
-    const contractAddress = this.configService.mintContractAddress;
-    const tx = await this.account.execute({
-      contractAddress,
-      entrypoint: 'mint',
-      calldata: [userId.toString()],
-    });
-    if (this.analyticsService) {
-      await this.analyticsService.track(AnalyticsEvent.TokenMinted, {
-        userId: String(userId),
-        metadata: { transaction_hash: tx.transaction_hash },
-      });
+  async sendMintTx(userId: number, idempotencyKey?: string): Promise<{ transaction_hash: string }> {
+    const key = idempotencyKey || `blockchain:mint:${userId}`;
+    const lockKey = `blockchain:tx:mint:${userId}`;
+
+    const cached = await this.cacheService.get<{ transaction_hash: string }>(key);
+    if (cached) {
+      this.logger.debug(`Returning cached mint tx hash for user ${userId}`);
+      return cached;
     }
-    return { transaction_hash: tx.transaction_hash };
+
+    const lock = await this.cacheService.acquireLock(lockKey, 30000, 3);
+    if (!lock) {
+      const retryCached = await this.cacheService.get<{ transaction_hash: string }>(key);
+      if (retryCached) {
+        return retryCached;
+      }
+      throw new Error(`Failed to acquire lock for mint transaction after retries`);
+    }
+
+    try {
+      const doubleCheck = await this.cacheService.get<{ transaction_hash: string }>(key);
+      if (doubleCheck) {
+        return doubleCheck;
+      }
+
+      const contractAddress = this.configService.mintContractAddress;
+      const tx = await this.account.execute({
+        contractAddress,
+        entrypoint: 'mint',
+        calldata: [userId.toString()],
+      });
+
+      const result = { transaction_hash: tx.transaction_hash };
+      await this.cacheService.set(key, result, 3600);
+
+      if (this.analyticsService) {
+        await this.analyticsService.track(AnalyticsEvent.TokenMinted, {
+          userId: String(userId),
+          metadata: { transaction_hash: tx.transaction_hash },
+        });
+      }
+      return result;
+    } finally {
+      await this.cacheService.releaseLock(lock);
+    }
   }
 
   /**
    * Sends a transfer transaction to the blockchain.
    * 
    * This method executes a transfer operation on the configured contract,
-   * transferring tokens from one user to another.
+   * transferring tokens from one user to another. It uses idempotency caching
+   * and distributed locking to prevent duplicate transactions.
    * 
    * @param fromUserId - The ID of the user sending tokens
    * @param toUserId - The ID of the user receiving tokens
    * @param amount - The amount of tokens to transfer
+   * @param idempotencyKey - Optional custom idempotency key (defaults to blockchain:transfer:${fromUserId}:${toUserId})
    * @returns Promise containing the transaction hash
-   * @throws {Error} If the transaction fails or the contract is unreachable
+   * @throws {Error} If the transaction fails, the contract is unreachable, or lock cannot be acquired
    * 
    * @example
    * ```typescript
@@ -125,32 +163,66 @@ export class BlockchainService {
     fromUserId: number,
     toUserId: number,
     amount: number,
+    idempotencyKey?: string,
   ): Promise<{ transaction_hash: string }> {
-    const contractAddress = this.configService.mintContractAddress;
-    const tx = await this.account.execute({
-      contractAddress,
-      entrypoint: 'transfer',
-      calldata: [fromUserId.toString(), toUserId.toString(), amount.toString()],
-    });
-    if (this.analyticsService) {
-      await this.analyticsService.track(AnalyticsEvent.TokenTransferred, {
-        userId: String(fromUserId),
-        metadata: { toUserId, amount, transaction_hash: tx.transaction_hash },
-      });
+    const key = idempotencyKey || `blockchain:transfer:${fromUserId}:${toUserId}`;
+    const lockKey = `blockchain:tx:transfer:${fromUserId}:${toUserId}`;
+
+    const cached = await this.cacheService.get<{ transaction_hash: string }>(key);
+    if (cached) {
+      this.logger.debug(`Returning cached transfer tx hash for ${fromUserId} -> ${toUserId}`);
+      return cached;
     }
-    return { transaction_hash: tx.transaction_hash };
+
+    const lock = await this.cacheService.acquireLock(lockKey, 30000, 3);
+    if (!lock) {
+      const retryCached = await this.cacheService.get<{ transaction_hash: string }>(key);
+      if (retryCached) {
+        return retryCached;
+      }
+      throw new Error(`Failed to acquire lock for transfer transaction after retries`);
+    }
+
+    try {
+      const doubleCheck = await this.cacheService.get<{ transaction_hash: string }>(key);
+      if (doubleCheck) {
+        return doubleCheck;
+      }
+
+      const contractAddress = this.configService.mintContractAddress;
+      const tx = await this.account.execute({
+        contractAddress,
+        entrypoint: 'transfer',
+        calldata: [fromUserId.toString(), toUserId.toString(), amount.toString()],
+      });
+
+      const result = { transaction_hash: tx.transaction_hash };
+      await this.cacheService.set(key, result, 3600);
+
+      if (this.analyticsService) {
+        await this.analyticsService.track(AnalyticsEvent.TokenTransferred, {
+          userId: String(fromUserId),
+          metadata: { toUserId, amount, transaction_hash: tx.transaction_hash },
+        });
+      }
+      return result;
+    } finally {
+      await this.cacheService.releaseLock(lock);
+    }
   }
 
   /**
    * Sends a burn transaction to the blockchain.
    * 
    * This method executes a burn operation on the configured contract,
-   * burning tokens from the specified user's balance.
+   * burning tokens from the specified user's balance. It uses idempotency
+   * caching and distributed locking to prevent duplicate transactions.
    * 
    * @param userId - The ID of the user whose tokens will be burned
    * @param amount - The amount of tokens to burn
+   * @param idempotencyKey - Optional custom idempotency key (defaults to blockchain:burn:${userId})
    * @returns Promise containing the transaction hash
-   * @throws {Error} If the transaction fails or the contract is unreachable
+   * @throws {Error} If the transaction fails, the contract is unreachable, or lock cannot be acquired
    * 
    * @example
    * ```typescript
@@ -161,20 +233,52 @@ export class BlockchainService {
   async sendBurnTx(
     userId: number,
     amount: number,
+    idempotencyKey?: string,
   ): Promise<{ transaction_hash: string }> {
-    const contractAddress = this.configService.mintContractAddress;
-    const tx = await this.account.execute({
-      contractAddress,
-      entrypoint: 'burn',
-      calldata: [userId.toString(), amount.toString()],
-    });
-    if (this.analyticsService) {
-      await this.analyticsService.track(AnalyticsEvent.TokenBurned, {
-        userId: String(userId),
-        metadata: { amount, transaction_hash: tx.transaction_hash },
-      });
+    const key = idempotencyKey || `blockchain:burn:${userId}`;
+    const lockKey = `blockchain:tx:burn:${userId}`;
+
+    const cached = await this.cacheService.get<{ transaction_hash: string }>(key);
+    if (cached) {
+      this.logger.debug(`Returning cached burn tx hash for user ${userId}`);
+      return cached;
     }
-    return { transaction_hash: tx.transaction_hash };
+
+    const lock = await this.cacheService.acquireLock(lockKey, 30000, 3);
+    if (!lock) {
+      const retryCached = await this.cacheService.get<{ transaction_hash: string }>(key);
+      if (retryCached) {
+        return retryCached;
+      }
+      throw new Error(`Failed to acquire lock for burn transaction after retries`);
+    }
+
+    try {
+      const doubleCheck = await this.cacheService.get<{ transaction_hash: string }>(key);
+      if (doubleCheck) {
+        return doubleCheck;
+      }
+
+      const contractAddress = this.configService.mintContractAddress;
+      const tx = await this.account.execute({
+        contractAddress,
+        entrypoint: 'burn',
+        calldata: [userId.toString(), amount.toString()],
+      });
+
+      const result = { transaction_hash: tx.transaction_hash };
+      await this.cacheService.set(key, result, 3600);
+
+      if (this.analyticsService) {
+        await this.analyticsService.track(AnalyticsEvent.TokenBurned, {
+          userId: String(userId),
+          metadata: { amount, transaction_hash: tx.transaction_hash },
+        });
+      }
+      return result;
+    } finally {
+      await this.cacheService.releaseLock(lock);
+    }
   }
 
   /**

@@ -25,6 +25,7 @@ import {
 import { WalletEvents } from './enums/wallet-events.enum';
 import { ArgentXProvider } from './providers/argentx.provider';
 import { BraavosProvider } from './providers/braavos.provider';
+import { CacheService } from '../cache/cache.service';
 
 interface UserWalletState {
   activeProviderName: string | null;
@@ -41,6 +42,7 @@ export class WalletService {
   constructor(
     private configService: ConfigService,
     private eventEmitter: EventEmitter2,
+    private readonly cacheService: CacheService,
     argentXProvider: ArgentXProvider,
     braavosProvider: BraavosProvider,
   ) {
@@ -185,75 +187,86 @@ export class WalletService {
     address: string,
     retries = 3,
   ): Promise<{ hash: string }> {
-    const state = this.getUserState(userId);
-    if (!state.activeProviderName) {
-      throw new WalletNotConnectedException();
+    const lockKey = `wallet:transaction:${userId}`;
+    const lock = await this.cacheService.acquireLock(lockKey, 30000, 3);
+    if (!lock) {
+      throw new TransactionFailedException(
+        `Could not acquire lock for wallet transaction after retries`,
+      );
     }
-    const provider = this.getProvider(state.activeProviderName);
+    try {
+      const state = this.getUserState(userId);
+      if (!state.activeProviderName) {
+        throw new WalletNotConnectedException();
+      }
+      const provider = this.getProvider(state.activeProviderName);
 
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const currentChainId = await provider.getChainId();
-        if (transaction.chainId && transaction.chainId.toString() !== currentChainId) {
-          try {
-            await provider.switchNetwork(transaction.chainId.toString());
-            this.emitEvent<WalletNetworkSwitchedEvent>(WalletEvents.NETWORK_SWITCHED, {
+      for (let i = 0; i <= retries; i++) {
+        try {
+          const currentChainId = await provider.getChainId();
+          if (transaction.chainId && transaction.chainId.toString() !== currentChainId) {
+            try {
+              await provider.switchNetwork(transaction.chainId.toString());
+              this.emitEvent<WalletNetworkSwitchedEvent>(WalletEvents.NETWORK_SWITCHED, {
+                providerName: state.activeProviderName,
+                address,
+                oldChainId: currentChainId,
+                newChainId: transaction.chainId.toString(),
+              });
+              state.connectionStatus.chainId = transaction.chainId.toString();
+              continue;
+            } catch (switchError) {
+              throw new NetworkMismatchException(
+                transaction.chainId.toString(),
+                currentChainId,
+              );
+            }
+          }
+
+          const result = await provider.sendTransaction(transaction, address);
+          this.emitEvent<WalletTransactionSentEvent>(WalletEvents.TRANSACTION_SENT, {
+            providerName: state.activeProviderName,
+            address,
+            chainId: currentChainId,
+            transactionHash: result.hash,
+            transactionDetails: transaction,
+          });
+          return result;
+        } catch (error) {
+          if (error instanceof UserRejectedTransactionException) {
+            this.emitEvent<WalletTransactionRejectedEvent>(WalletEvents.TRANSACTION_REJECTED, {
               providerName: state.activeProviderName,
               address,
-              oldChainId: currentChainId,
-              newChainId: transaction.chainId.toString(),
+              chainId: state.connectionStatus.chainId,
+              transactionDetails: transaction,
+              error: { code: 'USER_REJECTED', message: error.message },
             });
-            state.connectionStatus.chainId = transaction.chainId.toString();
-            continue;
-          } catch (switchError) {
-            throw new NetworkMismatchException(
-              transaction.chainId.toString(),
-              currentChainId,
+            throw error;
+          } else if (error instanceof NetworkMismatchException) {
+            this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
+              providerName: state.activeProviderName,
+              address,
+              chainId: state.connectionStatus.chainId,
+              error: { code: 'NETWORK_MISMATCH', message: error.message },
+            });
+            throw error;
+          } else if (i < retries) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+          } else {
+            this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
+              providerName: state.activeProviderName,
+              address,
+              chainId: state.connectionStatus.chainId,
+              error: { code: 'TRANSACTION_FAILED', message: error.message },
+            });
+            throw new TransactionFailedException(
+              `Failed to send transaction via ${state.activeProviderName}: ${error.message}`,
             );
           }
         }
-
-        const result = await provider.sendTransaction(transaction, address);
-        this.emitEvent<WalletTransactionSentEvent>(WalletEvents.TRANSACTION_SENT, {
-          providerName: state.activeProviderName,
-          address,
-          chainId: currentChainId,
-          transactionHash: result.hash,
-          transactionDetails: transaction,
-        });
-        return result;
-      } catch (error) {
-        if (error instanceof UserRejectedTransactionException) {
-          this.emitEvent<WalletTransactionRejectedEvent>(WalletEvents.TRANSACTION_REJECTED, {
-            providerName: state.activeProviderName,
-            address,
-            chainId: state.connectionStatus.chainId,
-            transactionDetails: transaction,
-            error: { code: 'USER_REJECTED', message: error.message },
-          });
-          throw error;
-        } else if (error instanceof NetworkMismatchException) {
-          this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
-            providerName: state.activeProviderName,
-            address,
-            chainId: state.connectionStatus.chainId,
-            error: { code: 'NETWORK_MISMATCH', message: error.message },
-          });
-          throw error;
-        } else if (i < retries) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-        } else {
-          this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
-            providerName: state.activeProviderName,
-            address,
-            chainId: state.connectionStatus.chainId,
-            error: { code: 'TRANSACTION_FAILED', message: error.message },
-          });
-          throw new TransactionFailedException(
-            `Failed to send transaction via ${state.activeProviderName}: ${error.message}`,
-          );
-        }
       }
+    } finally {
+      await this.cacheService.releaseLock(lock);
     }
     throw new TransactionFailedException('Unknown error during transaction sending.');
   }
