@@ -44,7 +44,7 @@ export class CacheKeys {
   static readonly BLOCKCHAIN_MINT = 'blockchain:mint:{userId}';
   static readonly BLOCKCHAIN_TRANSFER = 'blockchain:transfer:{fromUserId}:{toUserId}';
   static readonly BLOCKCHAIN_BURN = 'blockchain:burn:{userId}';
-  static readonly WALLET_TRANSACTION = 'wallet:transaction:{userId}';
+  static readonly WALLET_TRANSACTION = 'wallet:transaction:{userId}:{requestId}';
   static readonly LEADERBOARD_UPDATE = 'leaderboard:user:{userId}';
   static readonly LEADERBOARD_RECALCULATE = 'leaderboard:recalculate';
 

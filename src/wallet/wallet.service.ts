@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,6 +16,7 @@ import type {
   Signature,
   TransactionRequest,
 } from './interfaces/wallet.interface';
+import { CacheKeys } from '../cache/decorators/cache.decorator';
 import {
   WalletProviderNotFoundException,
   WalletNotConnectedException,
@@ -181,25 +183,86 @@ export class WalletService {
     }
   }
 
+  private getStableRequestId(transaction: TransactionRequest): string {
+    if (transaction.requestId) {
+      return transaction.requestId;
+    }
+    const normalized: Record<string, any> = {};
+    Object.keys(transaction)
+      .filter((key) => key !== 'requestId')
+      .sort()
+      .forEach((key) => {
+        normalized[key] = (transaction as any)[key];
+      });
+    const payload = JSON.stringify(normalized);
+    return createHash('sha256').update(payload).digest('hex');
+  }
+
   async sendTransaction(
     userId: string,
     transaction: TransactionRequest,
     address: string,
     retries = 3,
   ): Promise<{ hash: string }> {
-    const lockKey = `wallet:transaction:${userId}`;
-    const lock = await this.cacheService.acquireLock(lockKey, 30000, 3);
+    const requestId = this.getStableRequestId(transaction);
+    const cacheKey = CacheKeys.build(CacheKeys.WALLET_TRANSACTION, {
+      userId,
+      requestId,
+    });
+    const lockKey = `wallet:transaction:${userId}:${requestId}`;
+
+    const existing = await this.cacheService.get<{ hash: string; status?: string }>(cacheKey);
+    if (existing?.hash) {
+      return existing;
+    }
+
+    if (existing?.status === 'pending') {
+      const pendingResult = await this.cacheService.waitForValue<{ hash: string }>(
+        cacheKey,
+        30000,
+        200,
+        (value) => !!value?.hash,
+      );
+      if (pendingResult) {
+        return pendingResult;
+      }
+    }
+
+    const lock = await this.cacheService.acquireLock(lockKey, 30000, retries);
     if (!lock) {
+      const retryCached = await this.cacheService.get<{ hash: string }>(cacheKey);
+      if (retryCached) {
+        return retryCached;
+      }
       throw new TransactionFailedException(
         `Could not acquire lock for wallet transaction after retries`,
       );
     }
+
     try {
       const state = this.getUserState(userId);
       if (!state.activeProviderName) {
         throw new WalletNotConnectedException();
       }
       const provider = this.getProvider(state.activeProviderName);
+
+      const doubleCheck = await this.cacheService.get<{ hash: string }>(cacheKey);
+      if (doubleCheck) {
+        return doubleCheck;
+      }
+
+      const reserved = await this.cacheService.setIfNotExists(cacheKey, { status: 'pending' }, 30);
+      if (!reserved) {
+        const pendingResult = await this.cacheService.waitForValue<{ hash: string }>(
+          cacheKey,
+          30000,
+          200,
+          (value) => !!value?.hash,
+        );
+        if (pendingResult) {
+          return pendingResult;
+        }
+      }
 
       for (let i = 0; i <= retries; i++) {
         try {
@@ -224,6 +287,7 @@ export class WalletService {
           }
 
           const result = await provider.sendTransaction(transaction, address);
+          await this.cacheService.set(cacheKey, result, 3600);
           this.emitEvent<WalletTransactionSentEvent>(WalletEvents.TRANSACTION_SENT, {
             providerName: state.activeProviderName,
             address,
@@ -250,19 +314,28 @@ export class WalletService {
               error: { code: 'NETWORK_MISMATCH', message: error.message },
             });
             throw error;
-          } else if (i < retries) {
-            await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-          } else {
-            this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
-              providerName: state.activeProviderName,
-              address,
-              chainId: state.connectionStatus.chainId,
-              error: { code: 'TRANSACTION_FAILED', message: error.message },
-            });
-            throw new TransactionFailedException(
-              `Failed to send transaction via ${state.activeProviderName}: ${error.message}`,
-            );
           }
+
+          const retryCached = await this.cacheService.get<{ hash: string }>(cacheKey);
+          if (retryCached) {
+            return retryCached;
+          }
+
+          if (i < retries) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+            continue;
+          }
+
+          await this.cacheService.del(cacheKey);
+          this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
+            providerName: state.activeProviderName,
+            address,
+            chainId: state.connectionStatus.chainId,
+            error: { code: 'TRANSACTION_FAILED', message: error.message },
+          });
+          throw new TransactionFailedException(
+            `Failed to send transaction via ${state.activeProviderName}: ${error.message}`,
+          );
         }
       }
     } finally {

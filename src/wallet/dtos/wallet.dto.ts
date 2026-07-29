@@ -73,11 +73,10 @@ export class SendTransactionDto {
   nonce?: string;
 
   @IsOptional()
-  @IsNumberString()
-  chainId?: string; // Expected chain ID for the transaction
+  @IsString()
+  requestId?: string; // Stable request identifier for idempotent retries
 
-  // You might add more fields relevant to your specific blockchain/wallet
-}
+  @IsOptional()
 
 export class SwitchNetworkDto {
   @IsString()

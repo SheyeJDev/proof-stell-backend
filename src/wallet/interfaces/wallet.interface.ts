@@ -19,6 +19,7 @@ export interface TransactionRequest {
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
   nonce?: string;
+  requestId?: string;
   data?: string;
   value?: string;
   chainId?: string | number;
