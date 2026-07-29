@@ -77,6 +77,9 @@ export class SendTransactionDto {
   requestId?: string; // Stable request identifier for idempotent retries
 
   @IsOptional()
+  @IsString()
+  chainId?: string; // The chain ID the transaction is targeting
+}
 
 export class SwitchNetworkDto {
   @IsString()
