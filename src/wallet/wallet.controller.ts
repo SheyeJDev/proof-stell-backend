@@ -115,6 +115,7 @@ export class WalletController {
       maxFeePerGas: body.maxFeePerGas,
       maxPriorityFeePerGas: body.maxPriorityFeePerGas,
       nonce: body.nonce,
+      requestId: body.requestId,
       chainId: body.chainId,
     };
     const result = await this.walletService.sendTransaction(

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ArgentXProvider } from './providers/argentx.provider';
 import { BraavosProvider } from './providers/braavos.provider';
+import { CacheService } from '../cache/cache.service';
 import {
   WalletNotConnectedException,
   WalletProviderNotFoundException,
@@ -36,6 +37,18 @@ describe('WalletService', () => {
         WalletService,
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: EventEmitter2, useValue: { emit: jest.fn(), on: jest.fn() } },
+        {
+          provide: CacheService,
+          useValue: {
+            get: jest.fn().mockResolvedValue(undefined),
+            set: jest.fn().mockResolvedValue(undefined),
+            acquireLock: jest.fn().mockResolvedValue({ key: 'wallet:transaction:user1:abc', token: 'token' }),
+            releaseLock: jest.fn().mockResolvedValue(true),
+            setIfNotExists: jest.fn().mockResolvedValue(true),
+            waitForValue: jest.fn().mockResolvedValue(undefined),
+            del: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         { provide: ArgentXProvider, useValue: mockProvider },
         { provide: BraavosProvider, useValue: { ...mockProvider, name: 'Braavos', isAvailable: jest.fn().mockReturnValue(false) } },
       ],
@@ -120,11 +133,27 @@ describe('WalletService', () => {
       await service.connect('user1', 'MockProvider');
       const result = await service.sendTransaction(
         'user1',
-        { to: '0xDEF', value: '100', chainId: '0x1' },
+        { to: '0xDEF', value: '100', chainId: '0x1', requestId: 'req-123' },
         '0xABC',
         0,
       );
       expect(result.hash).toBe('0xtxhash');
+    });
+
+    it('returns cached transaction when the same requestId is reused', async () => {
+      const mockCache = (service as any).cacheService as unknown as { get: jest.Mock };
+      mockCache.get.mockResolvedValueOnce({ hash: '0xcached' });
+
+      await service.connect('user1', 'MockProvider');
+      const result = await service.sendTransaction(
+        'user1',
+        { to: '0xDEF', value: '100', chainId: '0x1', requestId: 'req-123' },
+        '0xABC',
+        0,
+      );
+
+      expect(result.hash).toBe('0xcached');
+      expect(mockProvider.sendTransaction).not.toHaveBeenCalled();
     });
   });
 

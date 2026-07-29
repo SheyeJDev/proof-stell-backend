@@ -297,6 +297,43 @@ export class CacheService {
     }
   }
 
+  async setIfNotExists<T>(key: string, value: T, ttl?: number): Promise<boolean> {
+    const client = this.getRedisClient();
+    if (client?.set) {
+      const serialized = JSON.stringify(value);
+      const options: any = { nx: true };
+      if (ttl) {
+        options.ex = ttl;
+      }
+      const result = await client.set(key, serialized, options);
+      return result === 'OK';
+    }
+
+    const existing = await this.get<T>(key);
+    if (existing !== undefined) {
+      return false;
+    }
+    await this.set(key, value, ttl);
+    return true;
+  }
+
+  async waitForValue<T>(
+    key: string,
+    timeoutMs: number,
+    intervalMs = 100,
+    predicate?: (value: T | undefined) => boolean,
+  ): Promise<T | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const value = await this.get<T>(key);
+      if (value !== undefined && (!predicate || predicate(value))) {
+        return value;
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return undefined;
+  }
+
   /**
    * Gets cache statistics including hits, misses, and hit rate.
    * 
