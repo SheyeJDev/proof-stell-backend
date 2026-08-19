@@ -32,6 +32,8 @@ import { CacheService } from '../cache/cache.service';
 interface UserWalletState {
   activeProviderName: string | null;
   connectionStatus: WalletConnectionStatus;
+  /** Monotonically increasing nonce used to prevent replayed operations */
+  operationNonce: number;
 }
 
 @Injectable()
@@ -72,19 +74,33 @@ export class WalletService {
       this.userState.set(userId, {
         activeProviderName: null,
         connectionStatus: { isConnected: false },
+        operationNonce: 0,
       });
     }
     return this.userState.get(userId)!;
   }
 
+  /**
+   * Connect a wallet for a user.
+   *
+   * State is only updated on success. If provider.connect() fails, the
+   * user state remains in its previous (disconnected) position so we
+   * never leave a half-connected record.
+   */
   async connect(userId: string, providerName: string): Promise<WalletConnectionStatus> {
     const provider = this.getProvider(providerName);
-    const state = this.getUserState(userId);
+    // Snapshot previous state so we can roll back on failure
+    const prevState = this.getUserState(userId);
+    const prevProviderName = prevState.activeProviderName;
+    const prevStatus = { ...prevState.connectionStatus };
+
     try {
       this.logger.log(`User ${userId}: connecting to ${providerName}...`);
       const status = await provider.connect();
-      state.activeProviderName = providerName;
-      state.connectionStatus = status;
+      // Only commit state after successful connect
+      prevState.activeProviderName = providerName;
+      prevState.connectionStatus = status;
+      prevState.operationNonce++;
       this.emitEvent<WalletConnectedEvent>(WalletEvents.CONNECTED, {
         providerName,
         address: status.address,
@@ -92,6 +108,9 @@ export class WalletService {
       });
       return status;
     } catch (error) {
+      // Roll back to the previous state so we don't leave a half-connected record
+      prevState.activeProviderName = prevProviderName;
+      prevState.connectionStatus = prevStatus;
       this.logger.error(`User ${userId}: failed to connect to ${providerName}: ${error.message}`);
       this.emitEvent<WalletConnectionErrorEvent>(WalletEvents.CONNECTION_ERROR, {
         providerName,
@@ -101,30 +120,47 @@ export class WalletService {
     }
   }
 
+  /**
+   * Disconnect a user's wallet.
+   *
+   * Provider disconnect is attempted first. On success, state is reset.
+   * On failure, the error is emitted but the provider-side session is
+   * considered unrecoverable — we reset local state to avoid a stale
+   * in-memory record that would keep returning `isConnected: true` for
+   * a provider that no longer has a valid session.
+   */
   async disconnect(userId: string): Promise<void> {
     const state = this.getUserState(userId);
     if (!state.activeProviderName) {
       this.logger.warn(`User ${userId}: no active wallet to disconnect.`);
       return;
     }
-    const provider = this.getProvider(state.activeProviderName);
+    const providerName = state.activeProviderName;
+    const provider = this.getProvider(providerName);
+    const address = state.connectionStatus.address;
+    const chainId = state.connectionStatus.chainId;
+
     try {
       await provider.disconnect();
       this.emitEvent<WalletDisconnectedEvent>(WalletEvents.DISCONNECTED, {
-        providerName: state.activeProviderName,
-        address: state.connectionStatus.address,
-        chainId: state.connectionStatus.chainId,
+        providerName,
+        address,
+        chainId,
       });
-      state.activeProviderName = null;
-      state.connectionStatus = { isConnected: false };
     } catch (error) {
-      this.logger.error(`User ${userId}: failed to disconnect: ${error.message}`);
+      this.logger.error(`User ${userId}: provider disconnect failed: ${error.message}`);
       this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
-        providerName: state.activeProviderName,
+        providerName,
         error: { code: error.name, message: error.message },
       });
-      throw error;
+      // Fall through — still reset local state below
     }
+
+    // Always reset local state, even if provider.disconnect() threw.
+    // Leaving a stale state means subsequent operations would attempt
+    // to use a provider session that may no longer exist.
+    state.activeProviderName = null;
+    state.connectionStatus = { isConnected: false };
   }
 
   getConnectionStatus(userId: string): WalletConnectionStatus {

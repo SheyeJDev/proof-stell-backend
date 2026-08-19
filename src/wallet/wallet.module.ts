@@ -7,11 +7,14 @@ import { WalletController } from './wallet.controller';
 import { ArgentXProvider } from './providers/argentx.provider';
 import { BraavosProvider } from './providers/braavos.provider';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { CacheModule } from '../cache/cache.module';
+import { TypedConfigService } from '../common/config/typed-config.service';
 
 @Module({
   imports: [
     ConfigModule,
     EventEmitterModule.forRoot(),
+    CacheModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -25,7 +28,13 @@ import { AuthGuard } from '../auth/guards/auth.guard';
       }),
     }),
   ],
-  providers: [WalletService, ArgentXProvider, BraavosProvider, AuthGuard],
+  providers: [
+    WalletService,
+    ArgentXProvider,
+    BraavosProvider,
+    AuthGuard,
+    TypedConfigService,
+  ],
   controllers: [WalletController],
   exports: [WalletService],
 })

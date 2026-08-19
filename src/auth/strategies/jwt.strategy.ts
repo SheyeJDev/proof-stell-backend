@@ -30,7 +30,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(req: Request, payload: any) {
     const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
-    await this.authTokenService.assertTokenIsActive(payload, token);
+    await this.authTokenService.assertAccessTokenIsActive(payload, token);
 
     const user = await this.userService.findOne(payload.sub);
     if (!user) {

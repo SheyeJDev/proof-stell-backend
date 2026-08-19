@@ -25,6 +25,15 @@ import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { AuditLogInterceptor } from '../audit/interceptors/audit-log.interceptor';
 import { AUDIT_ACTIONS } from '../audit/constants/audit-actions';
 
+/**
+ * Authenticated user shape injected by AuthGuard from the verified JWT.
+ */
+interface AuthenticatedUser {
+  sub: string;
+  email: string;
+  role: string;
+}
+
 @UseInterceptors(WalletErrorInterceptor, AuditLogInterceptor)
 @UseGuards(AuthGuard)
 @Controller('wallet')
@@ -36,57 +45,63 @@ export class WalletController {
   @Post('connect')
   async connectWallet(
     @Body() body: ConnectWalletDto,
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<WalletConnectionStatus> {
+    const userId = req.user?.sub;
     this.logger.log(
-      `Received connect request for provider: ${body.providerName}`,
+      `Received connect request for provider: ${body.providerName} (user: ${userId})`,
     );
-    return this.walletService.connect(req.user.userId, body.providerName);
+    return this.walletService.connect(userId, body.providerName);
   }
 
   @Post('disconnect')
   async disconnectWallet(
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<{ message: string }> {
-    this.logger.log('Received disconnect request.');
-    await this.walletService.disconnect(req.user.userId);
+    const userId = req.user?.sub;
+    this.logger.log(`Received disconnect request (user: ${userId}).`);
+    await this.walletService.disconnect(userId);
     return { message: 'Wallet disconnected successfully.' };
   }
 
   @Get('status')
   getConnectionStatus(
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): WalletConnectionStatus {
-    this.logger.log('Received status request.');
-    return this.walletService.getConnectionStatus(req.user.userId);
+    const userId = req.user?.sub;
+    this.logger.log(`Received status request (user: ${userId}).`);
+    return this.walletService.getConnectionStatus(userId);
   }
 
   @Get('accounts')
   async getAccounts(
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<string[]> {
-    this.logger.log('Received get accounts request.');
-    return this.walletService.getAccounts(req.user.userId);
+    const userId = req.user?.sub;
+    this.logger.log(`Received get accounts request (user: ${userId}).`);
+    return this.walletService.getAccounts(userId);
   }
 
   @Get('chain-id')
   async getChainId(
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<string> {
-    this.logger.log('Received get chain ID request.');
-    return this.walletService.getChainId(req.user.userId);
+    const userId = req.user?.sub;
+    this.logger.log(`Received get chain ID request (user: ${userId}).`);
+    return this.walletService.getChainId(userId);
   }
 
   @Post('sign-message')
   async signMessage(
     @Body() body: SignMessageDto,
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<{ signature: Signature }> {
+    const userId = req.user?.sub;
     this.logger.log(
-      `Received sign message request for address: ${body.address}`,
+      `Received sign message request for address: ${body.address} (user: ${userId})`,
     );
     const signature = await this.walletService.signMessage(
-      req.user.userId,
+      userId,
       body.message,
       body.address,
     );
@@ -101,10 +116,11 @@ export class WalletController {
   })
   async sendTransaction(
     @Body() body: SendTransactionDto,
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<{ transactionHash: string }> {
+    const userId = req.user?.sub;
     this.logger.log(
-      `Received send transaction request from address: ${body.fromAddress}`,
+      `Received send transaction request from address: ${body.fromAddress} (user: ${userId})`,
     );
     const transactionRequest = {
       to: body.to,
@@ -119,7 +135,7 @@ export class WalletController {
       chainId: body.chainId,
     };
     const result = await this.walletService.sendTransaction(
-      req.user.userId,
+      userId,
       transactionRequest,
       body.fromAddress,
     );
@@ -129,12 +145,13 @@ export class WalletController {
   @Post('switch-network')
   async switchNetwork(
     @Body() body: SwitchNetworkDto,
-    @Request() req: { user: { userId: string } },
+    @Request() req: { user: AuthenticatedUser },
   ): Promise<{ message: string }> {
+    const userId = req.user?.sub;
     this.logger.log(
-      `Received switch network request to chain ID: ${body.chainId}`,
+      `Received switch network request to chain ID: ${body.chainId} (user: ${userId})`,
     );
-    await this.walletService.switchNetwork(req.user.userId, body.chainId);
+    await this.walletService.switchNetwork(userId, body.chainId);
     return { message: `Successfully switched to network ${body.chainId}.` };
   }
 }

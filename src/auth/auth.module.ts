@@ -8,6 +8,7 @@ import { UserModule } from 'src/users/users.module';
 import { AnalyticsModule } from 'src/analytics/analytics.module';
 import { AuthController } from './controllers/auth.controller';
 import { AuthService } from './providers/auth.service';
+import { AuthTokenService } from './providers/auth-token.service';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { CacheModule } from 'src/cache/cache.module';
 import { TypedConfigService } from 'src/common/config/typed-config.service';
@@ -33,7 +34,14 @@ import { TypedConfigService } from 'src/common/config/typed-config.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, LocalStrategy, JwtStrategy, RolesGuard],
-  exports: [AuthService],
+  providers: [
+    AuthService,
+    AuthTokenService,
+    LocalStrategy,
+    JwtStrategy,
+    RolesGuard,
+    TypedConfigService,
+  ],
+  exports: [AuthService, AuthTokenService],
 })
 export class AuthModule {}

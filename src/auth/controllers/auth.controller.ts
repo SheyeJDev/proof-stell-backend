@@ -62,7 +62,28 @@ export class AuthController {
     });
   }
 
-  @ApiOperation({ summary: 'Logout user' })
+  @ApiOperation({ summary: 'Refresh access token using a valid refresh token' })
+  @ApiResponse({
+    status: 200,
+    description: 'Token pair refreshed successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid, expired, or reused refresh token',
+  })
+  @Throttle({ default: { ttl: 60, limit: 10 } })
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(
+    @Body('refresh_token') refreshToken: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    if (!refreshToken || typeof refreshToken !== 'string') {
+      return { access_token: '', refresh_token: '' };
+    }
+    return this.authService.refreshTokens(refreshToken);
+  }
+
+  @ApiOperation({ summary: 'Logout user and revoke current session' })
   @ApiResponse({
     status: 200,
     description: 'User logged out successfully',
@@ -73,9 +94,25 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(
     @Headers('authorization') authorization?: string,
+    @Body('refresh_token') refreshToken?: string,
   ): Promise<MessageResponseDto> {
-    await this.authService.logout(this.extractBearerToken(authorization));
+    const accessToken = this.extractBearerToken(authorization);
+    await this.authService.logout(accessToken, refreshToken);
     return { message: 'Logged out successfully' };
+  }
+
+  @ApiOperation({ summary: 'Logout from all sessions (force-expire)' })
+  @ApiResponse({
+    status: 200,
+    description: 'All sessions revoked',
+    type: MessageResponseDto,
+  })
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(@Request() req): Promise<MessageResponseDto> {
+    await this.authService.forceExpireAllSessions(req.user.id);
+    return { message: 'All sessions revoked' };
   }
 
   @ApiOperation({ summary: 'Register new user' })
