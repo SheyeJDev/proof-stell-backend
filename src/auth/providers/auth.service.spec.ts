@@ -6,6 +6,10 @@ import { Role } from 'src/common/enums/role.enum';
 import { MailService } from 'src/mail/mail.service';
 import { HashingService } from './hashing.service';
 import { AnalyticsService } from 'src/analytics/analytics.service';
+import { AuthTokenService } from './auth-token.service';
+import { CacheService } from 'src/cache/cache.service';
+import { TypedConfigService } from 'src/common/config/typed-config.service';
+import { validationSchema } from 'src/common/config/validation';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -19,11 +23,16 @@ describe('AuthService', () => {
     updateLastLogin: jest.fn(),
     findByVerificationToken: jest.fn(),
     update: jest.fn(),
+    findOne: jest.fn(),
   };
 
   const mockAuthTokenService = {
     signAccessToken: jest.fn(),
     revokeAccessToken: jest.fn(),
+    generateRefreshToken: jest.fn(),
+    revokeAllUserRefreshTokens: jest.fn(),
+    rotateRefreshToken: jest.fn(),
+    decodeRefreshToken: jest.fn(),
   };
 
   const mockMailService = {
@@ -120,6 +129,14 @@ describe('AuthService', () => {
         {
           provide: AnalyticsService,
           useValue: mockAnalyticsService,
+        },
+        {
+          provide: CacheService,
+          useValue: cacheServiceMock,
+        },
+        {
+          provide: TypedConfigService,
+          useValue: mockConfigService,
         },
       ],
     }).compile();
@@ -277,7 +294,7 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    it('should return access token and user data', async () => {
+    it('should return access token, refresh token, and user data', async () => {
       const mockUser = {
         id: '123',
         email: 'test@example.com',
@@ -286,19 +303,30 @@ describe('AuthService', () => {
       };
 
       const mockToken = 'jwt.token.here';
+      const mockRefreshToken = 'refresh.jwt.token.here';
       mockAuthTokenService.signAccessToken.mockReturnValue(mockToken);
+      mockAuthTokenService.generateRefreshToken.mockResolvedValue({
+        refreshToken: mockRefreshToken,
+        family: 'test-family',
+        jti: 'test-jti',
+      });
       mockUserService.updateLastLogin.mockResolvedValue(undefined);
 
       const result = await service.login(mockUser);
 
       expect(result).toBeDefined();
       expect(result.access_token).toBe(mockToken);
+      expect(result.refresh_token).toBe(mockRefreshToken);
       expect(result.user).toBeDefined();
       expect(mockUserService.updateLastLogin).toHaveBeenCalledWith(mockUser.id);
       expect(mockAuthTokenService.signAccessToken).toHaveBeenCalledWith({
         id: mockUser.id,
         email: mockUser.email,
         role: mockUser.role,
+      });
+      expect(mockAuthTokenService.generateRefreshToken).toHaveBeenCalledWith({
+        id: mockUser.id,
+        email: mockUser.email,
       });
     });
 
@@ -308,6 +336,33 @@ describe('AuthService', () => {
       expect(mockAuthTokenService.revokeAccessToken).toHaveBeenCalledWith(
         'jwt.token.here',
       );
+    });
+
+    it('should revoke refresh token family when refresh token is provided on logout', async () => {
+      // Mock decodeRefreshToken on the authTokenService mock
+      mockAuthTokenService.decodeRefreshToken = jest.fn().mockReturnValue({
+        sub: 'user-123',
+        family: 'family-abc',
+      });
+
+      await service.logout('jwt.token.here', 'refresh.jwt.token.here');
+
+      expect(mockAuthTokenService.revokeAccessToken).toHaveBeenCalledWith(
+        'jwt.token.here',
+      );
+      expect(
+        mockAuthTokenService.revokeAllUserRefreshTokens,
+      ).toHaveBeenCalledWith('user-123');
+    });
+  });
+
+  describe('forceExpireAllSessions', () => {
+    it('should revoke all refresh token families for a user', async () => {
+      await service.forceExpireAllSessions('user-123');
+
+      expect(
+        mockAuthTokenService.revokeAllUserRefreshTokens,
+      ).toHaveBeenCalledWith('user-123');
     });
   });
 
@@ -514,12 +569,13 @@ describe('AuthService', () => {
           ).rejects.toThrow('Invalid credentials');
         }
 
+        const cacheServiceMock = createCacheServiceMock();
         const secondService = new AuthService(
           mockUserService as any,
-          mockJwtService as any,
+          mockAuthTokenService as any,
           mockHashingService as any,
           mockMailService as any,
-          createCacheServiceMock() as any,
+          cacheServiceMock as any,
           mockConfigService as any,
           mockAnalyticsService as any,
         );

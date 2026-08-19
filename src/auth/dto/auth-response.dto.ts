@@ -9,6 +9,12 @@ export class LoginResponseDto {
   access_token: string;
 
   @ApiProperty({
+    description: 'Rotating refresh token for obtaining new access tokens',
+    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  })
+  refresh_token: string;
+
+  @ApiProperty({
     description: 'User information',
     type: ReadUserDto,
   })

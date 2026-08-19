@@ -39,11 +39,11 @@ interface LockoutMetadata {
 
 /**
  * Service for managing user authentication and authorization.
- * 
+ *
  * This service handles user registration, login, logout, email verification,
  * and account security features including login attempt tracking and account lockout.
  * It integrates with JWT for token-based authentication and bcrypt for password hashing.
- * 
+ *
  * @example
  * ```typescript
  * const authService = new AuthService(
@@ -64,7 +64,7 @@ export class AuthService {
 
   /**
    * Creates a new AuthService instance.
-   * 
+   *
    * @param userService - Service for user data operations
    * @param authTokenService - Service for JWT token management
    * @param hashingService - Service for password hashing
@@ -86,11 +86,11 @@ export class AuthService {
 
   /**
    * Validates user credentials for authentication.
-   * 
+   *
    * This method checks the user's email and password, verifies account status,
    * and enforces account lockout policies for failed login attempts. It tracks
    * failed attempts by email, IP address, and user agent to prevent brute force attacks.
-   * 
+   *
    * @param email - The user's email address
    * @param password - The user's plain-text password
    * @param clientIp - The client's IP address for lockout tracking
@@ -98,7 +98,7 @@ export class AuthService {
    * @returns Promise containing the validated user object
    * @throws {UnauthorizedException} If credentials are invalid, account is inactive,
    *         email is not verified, or account is locked
-   * 
+   *
    * @example
    * ```typescript
    * const user = await authService.validateUser(
@@ -164,18 +164,18 @@ export class AuthService {
   }
 
   /**
-   * Authenticates a user and generates an access token.
-   * 
+   * Authenticates a user and generates an access + refresh token pair.
+   *
    * This method updates the user's last login timestamp, tracks the login event
-   * in analytics, and generates a JWT access token for the user.
-   * 
+   * in analytics, and generates a JWT access token and a rotating refresh token.
+   *
    * @param user - The validated user object
    * @param context - Optional login context (IP, user agent)
-   * @returns Object containing the access token and user data
-   * 
+   * @returns Object containing the access token, refresh token, and user data
+   *
    * @example
    * ```typescript
-   * const { access_token, user } = await authService.login(validatedUser, {
+   * const { access_token, refresh_token, user } = await authService.login(validatedUser, {
    *   ip: '192.168.1.1',
    *   userAgent: 'Mozilla/5.0...'
    * });
@@ -192,12 +192,22 @@ export class AuthService {
       });
     }
 
-    return {
-      access_token: this.authTokenService.signAccessToken({
+    const access_token = this.authTokenService.signAccessToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    // Generate rotating refresh token
+    const { refreshToken: refresh_token } =
+      await this.authTokenService.generateRefreshToken({
         id: user.id,
         email: user.email,
-        role: user.role,
-      }),
+      });
+
+    return {
+      access_token,
+      refresh_token,
       user: plainToClass(ReadUserDto, user, {
         excludeExtraneousValues: true,
       }),
@@ -205,35 +215,101 @@ export class AuthService {
   }
 
   /**
-   * Logs out a user by revoking their access token.
-   * 
-   * This method adds the access token to the revocation list, preventing
-   * its use for future authentication requests.
-   * 
+   * Rotate a refresh token pair: revoke the old refresh token, issue new
+   * access + refresh tokens.
+   *
+   * @param refreshToken - The current refresh token
+   * @returns New token pair
+   * @throws {UnauthorizedException} If the token is invalid or reuse is detected
+   */
+  async refreshTokens(refreshToken: string): Promise<{
+    access_token: string;
+    refresh_token: string;
+  }> {
+    // Decode the original refresh token to get the userId,
+    // then fetch the user and sign a proper access token.
+    const decoded = this.authTokenService.decodeRefreshToken(refreshToken);
+
+    if (!decoded?.sub) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // rotateRefreshToken validates, rotates, and issues new tokens
+    const { accessToken, refreshToken: newRefreshToken, family } =
+      await this.authTokenService.rotateRefreshToken(refreshToken);
+
+    const user = await this.userService.findOne(decoded.sub);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const access_token = this.authTokenService.signAccessToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      access_token,
+      refresh_token: newRefreshToken,
+    };
+  }
+
+  /**
+   * Logs out a user by revoking their access token and, optionally, their
+   * refresh token family.
+   *
    * @param accessToken - The JWT access token to revoke
-   * 
+   * @param refreshToken - Optional refresh token to revoke its family
+   *
    * @example
    * ```typescript
    * await authService.logout(accessToken);
    * ```
    */
-  async logout(accessToken: string): Promise<void> {
+  async logout(accessToken: string, refreshToken?: string): Promise<void> {
     await this.authTokenService.revokeAccessToken(accessToken);
+
+    // If a refresh token is provided, revoke its entire family
+    if (refreshToken) {
+      try {
+        const decoded = this.authTokenService.decodeRefreshToken(refreshToken);
+        if (decoded?.sub) {
+          await this.authTokenService.revokeAllUserRefreshTokens(decoded.sub);
+        }
+      } catch {
+        // Best-effort: don't fail the logout if refresh revocation fails
+        this.logger.warn('Failed to revoke refresh tokens during logout');
+      }
+    }
+  }
+
+  /**
+   * Force-expire ALL sessions for a user: revoke every access token jti in
+   * the cache and invalidate all refresh token families.
+   *
+   * @param userId - The user whose sessions should be revoked
+   */
+  async forceExpireAllSessions(userId: string): Promise<void> {
+    // Revoke all refresh token families
+    await this.authTokenService.revokeAllUserRefreshTokens(userId);
+
+    this.logger.log(`Force-expired all sessions for user ${userId}`);
   }
 
   /**
    * Registers a new user account.
-   * 
+   *
    * This method creates a new user with the provided credentials, generates
    * an email verification token, and sends a verification email to the user.
    * The account is created in an unverified state and cannot be used until
    * the email is verified.
-   * 
+   *
    * @param registerDto - The registration data containing email, username, and password
    * @returns Promise containing the access token (empty until verified) and user data
    * @throws {ConflictException} If email or username already exists
    * @throws {Error} If registration fails for other reasons
-   * 
+   *
    * @example
    * ```typescript
    * const { user } = await authService.register({
@@ -283,15 +359,15 @@ export class AuthService {
 
   /**
    * Verifies a user's email address using a verification token.
-   * 
+   *
    * This method validates the email verification token, checks if it has expired,
    * and marks the user's email as verified if the token is valid.
-   * 
+   *
    * @param token - The email verification token sent to the user
    * @returns Promise containing true if verification was successful
    * @throws {UnauthorizedException} If token is invalid or expired
    * @throws {ConflictException} If email is already verified
-   * 
+   *
    * @example
    * ```typescript
    * const verified = await authService.verifyEmail('uuid-token-here');
@@ -319,15 +395,15 @@ export class AuthService {
 
   /**
    * Resends the email verification token to a user.
-   * 
+   *
    * This method generates a new verification token for an unverified user
    * and sends it via email. Useful if the previous token expired or was lost.
-   * 
+   *
    * @param email - The user's email address
    * @returns Promise containing true if the email was sent successfully
    * @throws {UnauthorizedException} If user is not found
    * @throws {ConflictException} If email is already verified
-   * 
+   *
    * @example
    * ```typescript
    * await authService.resendVerificationEmail('user@example.com');
@@ -434,15 +510,15 @@ export class AuthService {
 
   /**
    * Gets the remaining lockout time for a user's account.
-   * 
+   *
    * This method checks if an account is currently locked due to too many
    * failed login attempts and returns the remaining time in seconds.
-   * 
+   *
    * @param email - The user's email address
    * @param clientIp - The client's IP address for lockout lookup
    * @param userAgent - The client's user agent for device-specific lookup
    * @returns Promise containing the remaining lockout time in seconds (0 if not locked)
-   * 
+   *
    * @example
    * ```typescript
    * const remainingSeconds = await authService.getRemainingLockoutTime(
@@ -485,15 +561,15 @@ export class AuthService {
 
   /**
    * Manually unlocks a user's account (admin function).
-   * 
+   *
    * This method clears failed login attempts and removes account lockout
    * for a specific user. This is typically used by administrators to unlock
    * accounts that were locked due to suspicious activity.
-   * 
+   *
    * @param email - The user's email address
    * @param clientIp - The IP address to clear lockout for
    * @param userAgent - The user agent to clear lockout for
-   * 
+   *
    * @example
    * ```typescript
    * await authService.unlockAccount('user@example.com');

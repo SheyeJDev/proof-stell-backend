@@ -3,6 +3,11 @@ import { WalletController } from './wallet.controller';
 import { WalletService } from './wallet.service';
 import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { CacheService } from '../cache/cache.service';
+import { TypedConfigService } from '../common/config/typed-config.service';
+import { AuditLogInterceptor } from '../audit/interceptors/audit-log.interceptor';
+import { Reflector } from '@nestjs/core';
+import { WalletErrorInterceptor } from './interceptors/wallet-error.interceptor';
 
 const mockWalletService = {
   connect: jest.fn(),
@@ -15,7 +20,8 @@ const mockWalletService = {
   switchNetwork: jest.fn(),
 };
 
-const mockUser = { userId: 'user-123', role: 'player' };
+// JWT payload uses `sub` for the user ID (not `userId`)
+const mockUser = { sub: 'user-123', role: 'player' };
 const mockReq = { user: mockUser };
 
 describe('WalletController', () => {
@@ -27,14 +33,18 @@ describe('WalletController', () => {
       providers: [
         { provide: WalletService, useValue: mockWalletService },
         { provide: JwtService, useValue: { verifyAsync: jest.fn() } },
-        {
-          provide: AuthGuard,
-          useValue: { canActivate: jest.fn().mockReturnValue(true) },
-        },
+        { provide: CacheService, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
+        { provide: TypedConfigService, useValue: { jwtSecret: 'test', jwtIssuer: 'test', jwtAudience: 'test' } },
+        { provide: AuditLogInterceptor, useValue: { intercept: jest.fn() } },
+        { provide: Reflector, useValue: { getAllAndOverride: jest.fn() } },
       ],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: jest.fn().mockReturnValue(true) })
+      .overrideInterceptor(WalletErrorInterceptor)
+      .useValue({ intercept: jest.fn() })
+      .overrideInterceptor(AuditLogInterceptor)
+      .useValue({ intercept: jest.fn() })
       .compile();
 
     controller = module.get<WalletController>(WalletController);
