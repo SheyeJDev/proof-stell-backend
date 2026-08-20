@@ -33,6 +33,7 @@ import { CacheModule } from './cache/cache.module';
 import { ProtectedModule } from './protected/protected.module';
 import { HealthModule } from './health/health.module';
 import { TranslationModule } from './translation';
+import { MetricsModule } from './common/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { TranslationModule } from './translation';
     }),
     ScheduleModule.forRoot(),
     PrometheusModule.register(),
+    MetricsModule,
     UserModule,
     AuthModule,
     LeaderboardModule,

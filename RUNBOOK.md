@@ -101,15 +101,114 @@ docker compose -f docker-compose.observability.yml up -d
 | Loki | 3100 | Log aggregation |
 | Promtail | — | Log shipping from Winston output |
 | Alertmanager | 9093 | Alert routing (`alertmanager.yml`) |
-| Grafana | 3000\* | Dashboards |
+| Grafana | 3001 (or 3000) | Dashboards |
 
-\* Adjust if the app also runs on 3000.
-
-**Metrics endpoint:** `GET /metrics` (Prometheus format, exposed by `@willsoto/nestjs-prometheus`).
+**Metrics endpoint:** `GET /metrics` (Prometheus format, exposed by `@willsoto/nestjs-prometheus` and custom `MetricsModule`).
 
 **Log format:** Winston emits structured JSON. Each log line carries `requestId`, `userId`, `route`, and redacted field list.
 
 **Alert rules:** `alert.rules.yml` — covers high error rate, slow queries, and failed cron jobs.
+
+---
+
+## Prometheus Metrics Catalog
+
+The backend exposes rich domain and infrastructure metrics for Prometheus scraping:
+
+### 1. Blockchain Transaction Metrics
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `blockchain_transaction_duration_ms` | Histogram | `method`, `status` | Latency of StarkNet transactions in milliseconds |
+| `blockchain_transaction_total` | Counter | `method`, `status` | Total count of blockchain transactions executed |
+| `blockchain_transaction_errors_total` | Counter | `method`, `error_type` | Total count of blockchain errors categorized by error type |
+
+### 2. Cache Metrics
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `cache_hit_total` | Counter | `operation`, `key_prefix` | Total count of cache hits |
+| `cache_miss_total` | Counter | `operation`, `key_prefix` | Total count of cache misses |
+| `cache_operation_duration_ms` | Histogram | `operation`, `status` | Duration of cache operations (`get`, `set`, `del`, `increment`, `lock`) |
+
+### 3. Database Metrics
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `database_query_duration_ms` | Histogram | `query_type`, `status` | Latency of database queries (`select`, `insert`, `update`, `delete`) |
+| `database_connection_pool_size` | Gauge | `database` | Total allocated connections in the database connection pool |
+| `available_connections` | Gauge | `database` | Idle connections available in the connection pool |
+| `database_available_connections` | Gauge | `database` | Alias for available idle connections |
+| `database_transaction_duration_ms` | Histogram | `transaction_name`, `status` | Duration of database transactions / sagas |
+
+### 4. Method Auto-Instrumentation Metrics (`@TrackMetrics`)
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `method_invocation_duration_ms` | Histogram | `class_name`, `method_name`, `status` | Latency of instrumented service & controller methods |
+| `method_invocations_total` | Counter | `class_name`, `method_name`, `status` | Total count of method invocations |
+| `method_errors_total` | Counter | `class_name`, `method_name`, `error_type` | Total errors thrown by instrumented methods |
+
+---
+
+## Service Level Objectives (SLOs) & Indicators (SLIs)
+
+| Objective / Area | SLI (Service Level Indicator) | Target (SLO) | Alerting Threshold |
+|---|---|---|---|
+| **Blockchain Tx Success Rate** | `sum(rate(blockchain_transaction_total{status="success"}[5m])) / sum(rate(blockchain_transaction_total[5m]))` | **≥ 99.0%** over 30d | `< 98.0%` for 5m |
+| **Blockchain Tx Latency (P95)** | `histogram_quantile(0.95, sum(rate(blockchain_transaction_duration_ms_bucket[5m])) by (le))` | **≤ 2500ms** | `> 3500ms` for 5m |
+| **Auth Endpoint Latency (P95)** | `histogram_quantile(0.95, sum(rate(method_invocation_duration_ms_bucket{class_name="AuthController"}[5m])) by (le))` | **≤ 300ms** | `> 500ms` for 5m |
+| **Auth Endpoint Availability** | `sum(rate(method_invocations_total{class_name="AuthController",status="success"}[5m])) / sum(rate(method_invocations_total{class_name="AuthController"}[5m]))` | **≥ 99.9%** | `< 99.0%` for 2m |
+| **Session Report Success** | `sum(rate(method_invocations_total{method_name="reportSession",status="success"}[5m])) / sum(rate(method_invocations_total{method_name="reportSession"}[5m]))` | **≥ 99.5%** | `< 98.5%` for 5m |
+| **Cache Hit Ratio** | `sum(rate(cache_hit_total[5m])) / (sum(rate(cache_hit_total[5m])) + sum(rate(cache_miss_total[5m])))` | **≥ 80.0%** | `< 65.0%` for 15m |
+| **DB Connection Pool Saturation** | `available_connections / database_connection_pool_size` | **≥ 20.0% available** | `< 10.0% available` for 2m |
+| **DB Query Latency (P95)** | `histogram_quantile(0.95, sum(rate(database_query_duration_ms_bucket[5m])) by (le))` | **≤ 50ms** | `> 100ms` for 5m |
+
+---
+
+## Grafana Dashboard Specification
+
+A preconfigured Grafana dashboard is located in `dashboards/proofstell-metrics-dashboard.json`.
+
+### Dashboard Panels & PromQL Queries
+
+#### Panel 1: Blockchain Transaction Overview
+- **Transaction Rate**: `sum(rate(blockchain_transaction_total[1m])) by (method, status)`
+- **P95 / P99 Latency**:
+  - P95: `histogram_quantile(0.95, sum(rate(blockchain_transaction_duration_ms_bucket[5m])) by (le, method))`
+  - P99: `histogram_quantile(0.99, sum(rate(blockchain_transaction_duration_ms_bucket[5m])) by (le, method))`
+- **Error Breakdown**: `sum(rate(blockchain_transaction_errors_total[5m])) by (method, error_type)`
+
+#### Panel 2: Cache Performance & Hit Ratio
+- **Cache Hit Ratio Gauge**:
+  ```promql
+  sum(rate(cache_hit_total[5m])) / (sum(rate(cache_hit_total[5m])) + sum(rate(cache_miss_total[5m]))) * 100
+  ```
+- **Hit vs Miss Rate**:
+  - Hits: `sum(rate(cache_hit_total[1m])) by (key_prefix)`
+  - Misses: `sum(rate(cache_miss_total[1m])) by (key_prefix)`
+- **Operation Latency (P95)**: `histogram_quantile(0.95, sum(rate(cache_operation_duration_ms_bucket[5m])) by (le, operation))`
+
+#### Panel 3: Database & Connection Pool Health
+- **Connection Pool Utilization**:
+  - Total Pool Size: `database_connection_pool_size`
+  - Available Connections: `available_connections`
+  - Active Connections: `database_connection_pool_size - available_connections`
+- **Database Query Latency by Type**:
+  ```promql
+  histogram_quantile(0.95, sum(rate(database_query_duration_ms_bucket[5m])) by (le, query_type))
+  ```
+- **Database Transaction / Saga Duration**:
+  ```promql
+  histogram_quantile(0.95, sum(rate(database_transaction_duration_ms_bucket[5m])) by (le, transaction_name))
+  ```
+
+#### Panel 4: Application & API Method Performance
+- **Auth Endpoint Latencies (P95)**:
+  ```promql
+  histogram_quantile(0.95, sum(rate(method_invocation_duration_ms_bucket{class_name="AuthController"}[5m])) by (le, method_name))
+  ```
+- **Leaderboard & Game Session Throughput**:
+  ```promql
+  sum(rate(method_invocations_total{class_name=~"LeaderboardService|GameSessionService"}[1m])) by (class_name, method_name, status)
+  ```
+
 
 ---
 

@@ -4,6 +4,7 @@ import { TypedConfigService } from '../common/config/typed-config.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AnalyticsEvent } from '../analytics/analytics-event.enum';
 import { CacheService } from '../cache/cache.service';
+import { TrackMetrics } from '../common/metrics/metrics.decorator';
 
 /**
  * Service for interacting with the StarkNet blockchain.
@@ -66,6 +67,7 @@ export class BlockchainService {
    * }
    * ```
    */
+  @TrackMetrics({ category: 'blockchain', trackBlockchain: true, operation: 'checkHealth' })
   async checkHealth(): Promise<void> {
     try {
       await this.provider.getBlockNumber();
@@ -92,6 +94,7 @@ export class BlockchainService {
    * console.log('Mint transaction:', result.transaction_hash);
    * ```
    */
+  @TrackMetrics({ category: 'blockchain', trackBlockchain: true, operation: 'sendMintTx' })
   async sendMintTx(userId: number, idempotencyKey?: string): Promise<{ transaction_hash: string }> {
     const key = idempotencyKey || `blockchain:mint:${userId}`;
     const lockKey = `blockchain:tx:mint:${userId}`;
@@ -159,6 +162,7 @@ export class BlockchainService {
    * console.log('Transfer transaction:', result.transaction_hash);
    * ```
    */
+  @TrackMetrics({ category: 'blockchain', trackBlockchain: true, operation: 'sendTransferTx' })
   async sendTransferTx(
     fromUserId: number,
     toUserId: number,
@@ -230,6 +234,7 @@ export class BlockchainService {
    * console.log('Burn transaction:', result.transaction_hash);
    * ```
    */
+  @TrackMetrics({ category: 'blockchain', trackBlockchain: true, operation: 'sendBurnTx' })
   async sendBurnTx(
     userId: number,
     amount: number,
@@ -297,6 +302,7 @@ export class BlockchainService {
    * console.log('User balance:', balance);
    * ```
    */
+  @TrackMetrics({ category: 'blockchain', trackBlockchain: true, operation: 'getBalance' })
   async getBalance(userId: number): Promise<{ balance: string }> {
     const contractAddress = this.configService.mintContractAddress;
     const contract = new Contract([], contractAddress, this.provider);
@@ -305,6 +311,7 @@ export class BlockchainService {
     return { balance };
   }
 
+  @TrackMetrics({ category: 'blockchain', trackBlockchain: true, operation: 'waitForTransactionReceipt' })
   async waitForTransactionReceipt(
     txHash: string,
     timeoutMs?: number,

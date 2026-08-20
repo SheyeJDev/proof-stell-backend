@@ -29,6 +29,7 @@ import {
   RegisterResponseDto,
   MessageResponseDto,
 } from '../dto/auth-response.dto';
+import { TrackMetrics } from 'src/common/metrics/metrics.decorator';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -55,6 +56,7 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @TrackMetrics({ category: 'auth', operation: 'login' })
   async login(@Body(ValidationPipe) loginDto: LoginDto, @Request() req) {
     return this.authService.login(req.user, {
       ip: this.getClientIp(req),
@@ -74,6 +76,7 @@ export class AuthController {
   @Throttle({ default: { ttl: 60, limit: 10 } })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @TrackMetrics({ category: 'auth', operation: 'refresh' })
   async refresh(
     @Body('refresh_token') refreshToken: string,
   ): Promise<{ access_token: string; refresh_token: string }> {
@@ -92,6 +95,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @TrackMetrics({ category: 'auth', operation: 'logout' })
   async logout(
     @Headers('authorization') authorization?: string,
     @Body('refresh_token') refreshToken?: string,
@@ -110,6 +114,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout-all')
   @HttpCode(HttpStatus.OK)
+  @TrackMetrics({ category: 'auth', operation: 'logoutAll' })
   async logoutAll(@Request() req): Promise<MessageResponseDto> {
     await this.authService.forceExpireAllSessions(req.user.id);
     return { message: 'All sessions revoked' };
@@ -134,6 +139,7 @@ export class AuthController {
   @Throttle({ default: { ttl: 600, limit: 10 } })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @TrackMetrics({ category: 'auth', operation: 'register' })
   async register(@Body(ValidationPipe) registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
@@ -169,6 +175,7 @@ export class AuthController {
   @Throttle({ default: { ttl: 3600, limit: 3 } })
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
+  @TrackMetrics({ category: 'auth', operation: 'resendVerification' })
   async resendVerification(
     @Body('email') email: string,
   ): Promise<MessageResponseDto> {
@@ -197,6 +204,7 @@ export class AuthController {
   })
   @Get('verify-email')
   @HttpCode(HttpStatus.OK)
+  @TrackMetrics({ category: 'auth', operation: 'verifyEmail' })
   async verifyEmail(
     @Query('token') token: string,
   ): Promise<MessageResponseDto> {

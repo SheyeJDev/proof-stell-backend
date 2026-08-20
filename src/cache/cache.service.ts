@@ -3,6 +3,12 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { DistributedLockService } from './distributed-lock.service';
 import { AcquiredLock } from './distributed-lock.service';
+import {
+  cacheHitCounter,
+  cacheMissCounter,
+  cacheOperationDurationHistogram,
+} from '../common/metrics/metrics.constants';
+import { TrackMetrics } from '../common/metrics/metrics.decorator';
 
 /**
  * Service for managing cache operations with Redis backend.
@@ -41,6 +47,12 @@ export class CacheService {
     private readonly distributedLockService: DistributedLockService,
   ) {}
 
+  private extractKeyPrefix(key: string): string {
+    if (!key || typeof key !== 'string') return 'default';
+    const parts = key.split(':');
+    return parts.length > 1 ? parts[0] : 'default';
+  }
+
   /**
    * Retrieves a value from the cache.
    * 
@@ -58,15 +70,28 @@ export class CacheService {
    * ```
    */
   async get<T>(key: string): Promise<T | undefined> {
-    const value = await this.cacheManager.get<T>(key);
-    if (value) {
-      this.hits++;
-      this.logger.debug(`Cache hit for key: ${key}`);
-    } else {
-      this.misses++;
-      this.logger.debug(`Cache miss for key: ${key}`);
+    const startTime = Date.now();
+    const keyPrefix = this.extractKeyPrefix(key);
+    try {
+      const value = await this.cacheManager.get<T>(key);
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'get', status: 'success' }, durationMs);
+
+      if (value !== undefined && value !== null) {
+        this.hits++;
+        cacheHitCounter.inc({ operation: 'get', key_prefix: keyPrefix });
+        this.logger.debug(`Cache hit for key: ${key}`);
+      } else {
+        this.misses++;
+        cacheMissCounter.inc({ operation: 'get', key_prefix: keyPrefix });
+        this.logger.debug(`Cache miss for key: ${key}`);
+      }
+      return value;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'get', status: 'error' }, durationMs);
+      throw error;
     }
-    return value;
   }
 
   /**
@@ -90,8 +115,17 @@ export class CacheService {
    * ```
    */
   async set<T>(key: string, value: T, ttl?: number): Promise<void> {
-    await this.cacheManager.set(key, value, ttl);
-    this.logger.debug(`Cache set for key: ${key}, ttl: ${ttl}`);
+    const startTime = Date.now();
+    try {
+      await this.cacheManager.set(key, value, ttl);
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'set', status: 'success' }, durationMs);
+      this.logger.debug(`Cache set for key: ${key}, ttl: ${ttl}`);
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'set', status: 'error' }, durationMs);
+      throw error;
+    }
   }
 
   /**
@@ -99,7 +133,7 @@ export class CacheService {
    * 
    * This method atomically increments a counter value. If the key doesn't exist,
    * it initializes to 1. Supports Redis INCR operation for better performance
- * when Redis is available.
+   * when Redis is available.
    * 
    * @param key - The cache key for the counter
    * @param ttl - Time-to-live in seconds (optional, only applied on first increment)
@@ -109,24 +143,33 @@ export class CacheService {
    * ```typescript
    * // Increment request counter with 5-minute TTL
    * const count = await cacheService.increment('api:requests:123', 300);
- * console.log('Request count:', count);
+   * console.log('Request count:', count);
    * ```
    */
   async increment(key: string, ttl?: number): Promise<number> {
-    const redisClient = this.getRedisClient();
-    if (redisClient?.incr) {
-      const value = await redisClient.incr(key);
-      if (value === 1 && ttl && redisClient.expire) {
-        await redisClient.expire(key, ttl);
+    const startTime = Date.now();
+    try {
+      const redisClient = this.getRedisClient();
+      let value: number;
+      if (redisClient?.incr) {
+        value = await redisClient.incr(key);
+        if (value === 1 && ttl && redisClient.expire) {
+          await redisClient.expire(key, ttl);
+        }
+      } else {
+        const current = (await this.get<number>(key)) || 0;
+        value = current + 1;
+        await this.set(key, value, ttl);
       }
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'increment', status: 'success' }, durationMs);
       this.logger.debug(`Cache increment for key: ${key}, value: ${value}`);
       return value;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'increment', status: 'error' }, durationMs);
+      throw error;
     }
-
-    const current = (await this.get<number>(key)) || 0;
-    const value = current + 1;
-    await this.set(key, value, ttl);
-    return value;
   }
 
   /**
@@ -161,6 +204,7 @@ export class CacheService {
    * }
    * ```
    */
+  @TrackMetrics({ category: 'cache', trackCache: true, operation: 'ping' })
   async ping(): Promise<void> {
     const redisClient = this.getRedisClient();
 
@@ -193,12 +237,21 @@ export class CacheService {
    * ```
    */
   async del(key: string): Promise<void> {
-    await this.cacheManager.del(key);
-    const redisClient = this.getRedisClient();
-    if (redisClient?.del) {
-      await redisClient.del(key);
+    const startTime = Date.now();
+    try {
+      await this.cacheManager.del(key);
+      const redisClient = this.getRedisClient();
+      if (redisClient?.del) {
+        await redisClient.del(key);
+      }
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'del', status: 'success' }, durationMs);
+      this.logger.debug(`Cache entry deleted for key: ${key}`);
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      cacheOperationDurationHistogram.observe({ operation: 'del', status: 'error' }, durationMs);
+      throw error;
     }
-    this.logger.debug(`Cache entry deleted for key: ${key}`);
   }
 
   /**
@@ -227,6 +280,7 @@ export class CacheService {
    * }
    * ```
    */
+  @TrackMetrics({ category: 'cache', trackCache: true, operation: 'acquireLock' })
   async acquireLock(key: string, ttl: number = 30000, retries = 3): Promise<AcquiredLock | null> {
     for (let attempt = 0; attempt <= retries; attempt++) {
       const lock = await this.distributedLockService.acquire(key, ttl);
@@ -255,6 +309,7 @@ export class CacheService {
    * const released = await cacheService.releaseLock(lock);
    * ```
    */
+  @TrackMetrics({ category: 'cache', trackCache: true, operation: 'releaseLock' })
   async releaseLock(lock: AcquiredLock | null | undefined): Promise<boolean> {
     if (!lock) {
       return false;
@@ -284,6 +339,7 @@ export class CacheService {
    * }
    * ```
    */
+  @TrackMetrics({ category: 'cache', trackCache: true, operation: 'withLock' })
   async withLock<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T | null> {
     const lock = await this.acquireLock(key, ttl);
     if (!lock) {

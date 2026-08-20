@@ -8,6 +8,7 @@ import { RealtimeGateway } from '../common/gateways/realtime.gateway';
 import { TypedConfigService } from '../common/config/typed-config.service';
 import { NotificationService } from '../notification/notification.service';
 import { CacheService } from '../cache/cache.service';
+import { IdempotencyService } from '../common/services/idempotency.service';
 
 const mockEntry = { id: 1, userId: 'u1', score: 100, rank: 1, updatedAt: new Date() };
 
@@ -55,6 +56,12 @@ const mockCacheService = {
   withLock: jest.fn().mockImplementation((_key, _ttl, callback) => callback()),
 };
 
+const mockIdempotencyService = {
+  generateKey: jest.fn().mockReturnValue('idemp-key'),
+  check: jest.fn().mockResolvedValue(null),
+  store: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('LeaderboardService', () => {
   let service: LeaderboardService;
   let gateway: RealtimeGateway;
@@ -76,6 +83,7 @@ describe('LeaderboardService', () => {
         { provide: TypedConfigService, useValue: mockConfigService },
         { provide: NotificationService, useValue: mockNotificationService },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: IdempotencyService, useValue: mockIdempotencyService },
         {
           provide: RealtimeGateway,
           useValue: {
