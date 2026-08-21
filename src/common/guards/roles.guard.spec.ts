@@ -1,13 +1,22 @@
-import { ExecutionContext } from '@nestjs/common';
+import {
+  ExecutionContext,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RolesGuard } from './roles.guard';
 import { Role } from '../enums/role.enum';
-import { ROLES_KEY } from '../decorators/roles.decorator';
+import { AuditLogService } from '../../audit/services/audit-log.service';
 
-const buildContext = (user: unknown, requiredRoles?: Role[]): ExecutionContext =>
+const buildContext = (user: unknown): ExecutionContext =>
   ({
     switchToHttp: () => ({
-      getRequest: () => ({ user }),
+      getRequest: () => ({
+        user,
+        method: 'GET',
+        originalUrl: '/test',
+        headers: {},
+      }),
     }),
     getHandler: jest.fn(),
     getClass: jest.fn(),
@@ -16,39 +25,58 @@ const buildContext = (user: unknown, requiredRoles?: Role[]): ExecutionContext =
 describe('RolesGuard', () => {
   let guard: RolesGuard;
   let reflector: Reflector;
+  let auditLogService: { logAction: jest.Mock };
 
   beforeEach(() => {
     reflector = new Reflector();
-    guard = new RolesGuard(reflector);
+    auditLogService = { logAction: jest.fn().mockResolvedValue(undefined) };
+    guard = new RolesGuard(reflector, auditLogService as unknown as AuditLogService);
   });
 
-  it('allows access when no roles metadata is set', () => {
+  it('allows access when no roles metadata is set', async () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
-    expect(guard.canActivate(buildContext({ role: Role.PLAYER }))).toBe(true);
+    await expect(
+      guard.canActivate(buildContext({ role: Role.PLAYER })),
+    ).resolves.toBe(true);
   });
 
-  it('allows a PLAYER to access a player route', () => {
+  it('allows a PLAYER to access a player route', async () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.PLAYER]);
-    expect(guard.canActivate(buildContext({ role: Role.PLAYER }))).toBe(true);
+    await expect(
+      guard.canActivate(buildContext({ role: Role.PLAYER })),
+    ).resolves.toBe(true);
   });
 
-  it('allows an ADMIN to access a player+admin route', () => {
+  it('allows an ADMIN to access a player+admin route', async () => {
     jest
       .spyOn(reflector, 'getAllAndOverride')
       .mockReturnValue([Role.PLAYER, Role.ADMIN]);
-    expect(guard.canActivate(buildContext({ role: Role.ADMIN }))).toBe(true);
+    await expect(
+      guard.canActivate(buildContext({ role: Role.ADMIN })),
+    ).resolves.toBe(true);
   });
 
-  it('denies a PLAYER from an admin-only route', () => {
+  it('denies a PLAYER from an admin-only route', async () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
-    expect(guard.canActivate(buildContext({ role: Role.PLAYER }))).toBe(false);
-  });
-
-  it('uses exact enum comparison — does not grant access on partial string match', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
-    // 'admin-extra' must NOT match Role.ADMIN ('admin')
-    expect(guard.canActivate(buildContext({ role: 'admin-extra' }))).toBe(
-      false,
+    await expect(
+      guard.canActivate(buildContext({ role: Role.PLAYER })),
+    ).rejects.toThrow(ForbiddenException);
+    expect(auditLogService.logAction).toHaveBeenCalledWith(
+      expect.objectContaining({ result: 'FAILURE' }),
     );
+  });
+
+  it('denies an unauthenticated request', async () => {
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
+    await expect(
+      guard.canActivate(buildContext(undefined)),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('uses exact enum comparison — does not grant access on partial string match', async () => {
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
+    await expect(
+      guard.canActivate(buildContext({ role: 'admin-extra' as Role })),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseInterceptors,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { MetricsService } from './services/metrics.service';
 import { AuditLog } from '../audit/decorators/audit-log.decorator';

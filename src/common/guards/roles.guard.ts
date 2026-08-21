@@ -42,7 +42,12 @@ export class RolesGuard implements CanActivate {
     }
 
     if (!user.role || !requiredRoles.includes(user.role)) {
-      void this.recordDenial(request, user.id, requiredRoles, 'INSUFFICIENT_PRIVILEGE');
+      void this.recordDenial(
+        request,
+        user.id,
+        requiredRoles,
+        'INSUFFICIENT_PRIVILEGE',
+      );
       throw new ForbiddenException('Insufficient role privileges');
     }
 
@@ -67,11 +72,13 @@ export class RolesGuard implements CanActivate {
           guard: RolesGuard.name,
         },
         ipAddress: extractClientIp(request),
-        userAgent: request.headers['user-agent'] as string | undefined,
+        userAgent: request.headers['user-agent'],
         resource: 'role-protected',
         result: 'FAILURE',
         errorMessage:
-          reason === 'NO_AUTH' ? 'Authentication required' : 'Insufficient role privileges',
+          reason === 'NO_AUTH'
+            ? 'Authentication required'
+            : 'Insufficient role privileges',
       });
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
