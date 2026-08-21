@@ -31,11 +31,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(req: Request, payload: any) {
     const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
     await this.authTokenService.assertAccessTokenIsActive(payload, token);
-
+  
     const user = await this.userService.findOne(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
-    return { id: payload.sub, email: payload.email, role: payload.role };
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is inactive');
+    }
+  
+    // Always trust the persisted role, never the JWT payload's role claim.
+    return { id: user.id, email: user.email, role: user.role };
   }
 }

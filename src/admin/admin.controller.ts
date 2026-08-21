@@ -2,19 +2,17 @@ import {
   Controller,
   Get,
   Query,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { AdminGuard } from '../common/guards/admin.guard';
 import { AdminService } from './admin.service';
 import { MetricsService } from './services/metrics.service';
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { AuditLogInterceptor } from '../audit/interceptors/audit-log.interceptor';
 import { AUDIT_ACTIONS } from '../audit/constants/audit-actions';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { AdminOnly } from 'src/audit/decorators/admin-only.decorator';
 
 @Controller('admin')
-@UseGuards(JwtAuthGuard, AdminGuard)
+@AdminOnly()
 @UseInterceptors(AuditLogInterceptor)
 export class AdminController {
   constructor(
