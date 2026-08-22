@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { Counter, Histogram, register } from 'prom-client';
 import { Leaderboard } from './entities/leaderboard.entity';
 import { CreateLeaderboardDto } from './dto/create-leaderboard.dto';
 import { UpdateLeaderboardDto } from './dto/update-leaderboard.dto';
@@ -18,13 +19,59 @@ import { IdempotencyService } from '../common/services/idempotency.service';
 import { CacheService } from '../cache/cache.service';
 import { CacheKeys } from '../cache/decorators/cache.decorator';
 
+function getOrCreateCounter<T extends string>(
+  config: import('prom-client').CounterConfiguration<T>,
+): Counter<T> {
+  const existing = register.getSingleMetric(config.name);
+  if (existing) {
+    return existing as Counter<T>;
+  }
+  return new Counter<T>(config);
+}
+
+function getOrCreateHistogram<T extends string>(
+  config: import('prom-client').HistogramConfiguration<T>,
+): Histogram<T> {
+  const existing = register.getSingleMetric(config.name);
+  if (existing) {
+    return existing as Histogram<T>;
+  }
+  return new Histogram<T>(config);
+}
+
+export const leaderboardOperationsCounter = getOrCreateCounter({
+  name: 'leaderboard_operations_total',
+  help: 'Total number of leaderboard operations executed',
+  labelNames: ['operation', 'status'] as const,
+});
+
+export const leaderboardOperationDurationHistogram = getOrCreateHistogram({
+  name: 'leaderboard_operation_duration_ms',
+  help: 'Duration of leaderboard operations in milliseconds',
+  labelNames: ['operation', 'status'] as const,
+  buckets: [5, 20, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+});
+
+export const leaderboardScoreSubmittedHistogram = getOrCreateHistogram({
+  name: 'leaderboard_score_submitted',
+  help: 'Distribution of submitted leaderboard scores',
+  labelNames: ['status'] as const,
+  buckets: [0, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 50000],
+});
+
+export const leaderboardErrorsCounter = getOrCreateCounter({
+  name: 'leaderboard_errors_total',
+  help: 'Total number of leaderboard errors by operation and error type',
+  labelNames: ['operation', 'error_type'] as const,
+});
+
 /**
  * Service for managing leaderboard rankings and score submissions.
- * 
+ *
  * This service handles score submissions, rank calculations, and leaderboard queries.
  * It uses database transactions for consistency, cache invalidation for performance,
  * and real-time updates via WebSocket for live leaderboard updates.
- * 
+ *
  * @example
  * ```typescript
  * const leaderboardService = new LeaderboardService(
@@ -43,7 +90,7 @@ export class LeaderboardService {
   private readonly logger = new Logger(LeaderboardService.name);
   /**
    * Creates a new LeaderboardService instance.
-   * 
+   *
    * @param leaderboardRepository - TypeORM repository for Leaderboard entity
    * @param dataSource - TypeORM data source for transaction management
    * @param configService - Service for configuration values
@@ -64,16 +111,16 @@ export class LeaderboardService {
 
   /**
    * Submits a score to the leaderboard.
-   * 
+   *
    * This method handles score submission with transaction safety, rank recalculation,
    * cache invalidation, and real-time updates. It ensures that only higher scores
    * are accepted and triggers notifications for rank changes.
-   * 
+   *
    * @param userId - The ID of the user submitting the score
    * @param createLeaderboardDto - Object containing the score to submit
    * @returns Promise containing the updated leaderboard entry
    * @throws {BadRequestException} If new score is not higher than current score
-   * 
+   *
    * @example
    * ```typescript
    * const entry = await leaderboardService.submitScore('user-id', { score: 1500 });
@@ -84,6 +131,7 @@ export class LeaderboardService {
     userId: string,
     createLeaderboardDto: CreateLeaderboardDto,
   ): Promise<Leaderboard> {
+    const startTime = Date.now();
     const { score } = createLeaderboardDto;
     const idempotencyKey = this.idempotencyService.generateKey(
       'submit-score',
@@ -91,18 +139,52 @@ export class LeaderboardService {
     );
 
     const lockKey = CacheKeys.build(CacheKeys.LEADERBOARD_UPDATE, { userId });
-    const result = await this.cacheService.withLock(lockKey, 30000, async () => {
-      const cachedResult = await this.idempotencyService.check<Leaderboard>(idempotencyKey);
-      if (cachedResult) {
-        return cachedResult;
-      }
-      return this.submitScoreWithTransaction(userId, score, idempotencyKey);
-    });
+    try {
+      const result = await this.cacheService.withLock(
+        lockKey,
+        30000,
+        async () => {
+          const cachedResult =
+            await this.idempotencyService.check<Leaderboard>(idempotencyKey);
+          if (cachedResult) {
+            return cachedResult;
+          }
+          return this.submitScoreWithTransaction(userId, score, idempotencyKey);
+        },
+      );
 
-    if (!result) {
-      throw new Error(`Could not acquire leaderboard update lock for user ${userId} after retries`);
+      if (!result) {
+        throw new Error(
+          `Could not acquire leaderboard update lock for user ${userId} after retries`,
+        );
+      }
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'submitScore', status: 'success' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'submitScore',
+        status: 'success',
+      });
+      leaderboardScoreSubmittedHistogram.observe({ status: 'success' }, score);
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'submitScore', status: 'error' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'submitScore',
+        status: 'error',
+      });
+      leaderboardErrorsCounter.inc({
+        operation: 'submitScore',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
     }
-    return result;
   }
 
   private async submitScoreWithTransaction(
@@ -147,9 +229,13 @@ export class LeaderboardService {
 
       // Recalculate ranks within the same transaction using SQL window function
       if (this.configService.leaderboardRecalculationStrategy !== 'batch') {
-        await this.cacheService.withLock('leaderboard:recalculate', 30000, async () => {
-          await this.recalculateRanksWithManager(queryRunner.manager);
-        });
+        await this.cacheService.withLock(
+          'leaderboard:recalculate',
+          30000,
+          async () => {
+            await this.recalculateRanksWithManager(queryRunner.manager);
+          },
+        );
       }
 
       finalEntry = await queryRunner.manager.findOneOrFail(Leaderboard, {
@@ -203,14 +289,14 @@ export class LeaderboardService {
 
   /**
    * Retrieves the global leaderboard with pagination.
-   * 
+   *
    * This method returns paginated leaderboard entries ordered by rank.
    * Results include user relations for display purposes.
-   * 
+   *
    * @param page - The page number to retrieve (default: 1)
    * @param limit - The number of entries per page (default: 50)
    * @returns Promise containing leaderboard entries, total count, and pagination info
-   * 
+   *
    * @example
    * ```typescript
    * const { leaderboard, total, page, limit } = await leaderboardService.getGlobalLeaderboard(1, 50);
@@ -226,26 +312,53 @@ export class LeaderboardService {
     page: number;
     limit: number;
   }> {
-    const [leaderboard, total] = await this.leaderboardRepository.findAndCount({
-      relations: ['user'],
-      order: { rank: 'ASC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-
-    return { leaderboard, total, page, limit };
+    const startTime = Date.now();
+    try {
+      const [leaderboard, total] =
+        await this.leaderboardRepository.findAndCount({
+          relations: ['user'],
+          order: { rank: 'ASC' },
+          skip: (page - 1) * limit,
+          take: limit,
+        });
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'getGlobalLeaderboard', status: 'success' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'getGlobalLeaderboard',
+        status: 'success',
+      });
+      return { leaderboard, total, page, limit };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'getGlobalLeaderboard', status: 'error' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'getGlobalLeaderboard',
+        status: 'error',
+      });
+      leaderboardErrorsCounter.inc({
+        operation: 'getGlobalLeaderboard',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   /**
    * Retrieves a specific user's leaderboard entry.
-   * 
+   *
    * This method returns the leaderboard entry for a specific user,
    * including their rank and user relation data.
-   * 
+   *
    * @param userId - The ID of the user to retrieve
    * @returns Promise containing the leaderboard entry
    * @throws {NotFoundException} If user is not found on the leaderboard
-   * 
+   *
    * @example
    * ```typescript
    * const entry = await leaderboardService.getUserLeaderboard('user-id');
@@ -253,28 +366,54 @@ export class LeaderboardService {
    * ```
    */
   async getUserLeaderboard(userId: string): Promise<Leaderboard> {
-    const leaderboardEntry = await this.leaderboardRepository.findOne({
-      where: { userId },
-      relations: ['user'],
-    });
+    const startTime = Date.now();
+    try {
+      const leaderboardEntry = await this.leaderboardRepository.findOne({
+        where: { userId },
+        relations: ['user'],
+      });
 
-    if (!leaderboardEntry) {
-      throw new NotFoundException('User not found in leaderboard');
+      if (!leaderboardEntry) {
+        throw new NotFoundException('User not found in leaderboard');
+      }
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'getUserLeaderboard', status: 'success' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'getUserLeaderboard',
+        status: 'success',
+      });
+      return leaderboardEntry;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'getUserLeaderboard', status: 'error' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'getUserLeaderboard',
+        status: 'error',
+      });
+      leaderboardErrorsCounter.inc({
+        operation: 'getUserLeaderboard',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
     }
-
-    return leaderboardEntry;
   }
 
   /**
    * Updates a user's score on the leaderboard.
-   * 
+   *
    * This method is an alias for submitScore, allowing score updates
    * through the update endpoint interface.
-   * 
+   *
    * @param userId - The ID of the user to update
    * @param updateLeaderboardDto - Object containing the new score
    * @returns Promise containing the updated leaderboard entry
-   * 
+   *
    * @example
    * ```typescript
    * const entry = await leaderboardService.updateScore('user-id', { score: 2000 });
@@ -284,16 +423,19 @@ export class LeaderboardService {
     userId: string,
     updateLeaderboardDto: UpdateLeaderboardDto,
   ): Promise<Leaderboard> {
-    return this.submitScore(userId, updateLeaderboardDto as CreateLeaderboardDto);
+    return this.submitScore(
+      userId,
+      updateLeaderboardDto as CreateLeaderboardDto,
+    );
   }
 
   /**
    * Recalculates ranks using a single SQL UPDATE with RANK() window function.
-   * 
+   *
    * This method efficiently recalculates all leaderboard ranks using
    * SQL window functions, avoiding in-memory row loading for large datasets.
    * It runs automatically every 5 minutes via cron job.
-   * 
+   *
    * @example
    * ```typescript
    * await leaderboardService.recalculateRanks();
@@ -302,18 +444,49 @@ export class LeaderboardService {
   // Batched rank recalculation every 5 minutes
   @Cron('*/5 * * * *')
   public async recalculateRanks(): Promise<void> {
-    await this.cacheService.withLock('leaderboard:recalculate', 30000, async () => {
-      await this.recalculateRanksWithManager(this.dataSource.manager);
-      await this.invalidateGlobalLeaderboardCache();
-    });
+    const startTime = Date.now();
+    try {
+      await this.cacheService.withLock(
+        'leaderboard:recalculate',
+        30000,
+        async () => {
+          await this.recalculateRanksWithManager(this.dataSource.manager);
+          await this.invalidateGlobalLeaderboardCache();
+        },
+      );
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'recalculateRanks', status: 'success' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'recalculateRanks',
+        status: 'success',
+      });
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'recalculateRanks', status: 'error' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'recalculateRanks',
+        status: 'error',
+      });
+      leaderboardErrorsCounter.inc({
+        operation: 'recalculateRanks',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   /**
    * Recalculates ranks using the specified entity manager.
-   * 
+   *
    * This private method performs the actual rank recalculation using
    * SQL window functions for efficiency.
-   * 
+   *
    * @param manager - The TypeORM entity manager to use for the query
    * @private
    */
@@ -333,10 +506,10 @@ export class LeaderboardService {
 
   /**
    * Forces an immediate rank recalculation.
-   * 
+   *
    * This method triggers an immediate rank recalculation outside of
    * the normal cron schedule. Useful for manual rank fixes.
-   * 
+   *
    * @example
    * ```typescript
    * await leaderboardService.forceRecalculateRanks();
@@ -348,27 +521,54 @@ export class LeaderboardService {
 
   /**
    * Resets the entire leaderboard.
-   * 
+   *
    * This method clears all leaderboard entries, invalidates cache,
    * and emits a reset event to connected clients. Use with caution.
-   * 
+   *
    * @example
    * ```typescript
    * await leaderboardService.resetLeaderboard();
    * ```
    */
   async resetLeaderboard(): Promise<void> {
-    await this.leaderboardRepository.clear();
-    await this.invalidateLeaderboardCache();
-    await this.emitRealtimeLeaderboardUpdate('global', 'reset');
+    const startTime = Date.now();
+    try {
+      await this.leaderboardRepository.clear();
+      await this.invalidateLeaderboardCache();
+      await this.emitRealtimeLeaderboardUpdate('global', 'reset');
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'resetLeaderboard', status: 'success' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'resetLeaderboard',
+        status: 'success',
+      });
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      leaderboardOperationDurationHistogram.observe(
+        { operation: 'resetLeaderboard', status: 'error' },
+        durationMs,
+      );
+      leaderboardOperationsCounter.inc({
+        operation: 'resetLeaderboard',
+        status: 'error',
+      });
+      leaderboardErrorsCounter.inc({
+        operation: 'resetLeaderboard',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   /**
    * Invalidates leaderboard cache entries.
-   * 
+   *
    * This private method clears cached leaderboard data for both
    * the global leaderboard and specific user entries.
-   * 
+   *
    * @param userId - Optional user ID to invalidate specific user cache
    * @private
    */
@@ -382,7 +582,7 @@ export class LeaderboardService {
 
   /**
    * Invalidates global leaderboard cache for common page/limit combinations.
-   * 
+   *
    * This private method clears cached leaderboard data for the most
    * commonly accessed page and limit combinations.
    * @private
@@ -391,7 +591,10 @@ export class LeaderboardService {
     // Invalidate common page/limit combinations
     for (const page of [1, 2, 3]) {
       for (const limit of [10, 20, 50, 100]) {
-        const key = CacheKeys.build(CacheKeys.GLOBAL_LEADERBOARD, { page, limit });
+        const key = CacheKeys.build(CacheKeys.GLOBAL_LEADERBOARD, {
+          page,
+          limit,
+        });
         await this.cacheService.del(key);
       }
     }
@@ -399,10 +602,10 @@ export class LeaderboardService {
 
   /**
    * Emits real-time leaderboard updates to connected clients.
-   * 
+   *
    * This private method broadcasts leaderboard updates via WebSocket
    * to all subscribed clients, including the top 100 entries.
-   * 
+   *
    * @param leaderboardId - The ID of the leaderboard to update
    * @param updateType - The type of update (score_change, rank_change, new_entry, reset)
    * @private
