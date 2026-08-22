@@ -50,9 +50,7 @@ describe('AdminGuard', () => {
     }).compile();
 
     guard = module.get<AdminGuard>(AdminGuard);
-    auditLogService = module.get(AuditLogService) as unknown as {
-      logAction: jest.Mock;
-    };
+    auditLogService = module.get(AuditLogService);
   });
 
   it('is defined', () => {
@@ -105,7 +103,11 @@ describe('AdminGuard', () => {
     it('still throws when AuditLogService.save fails (security first)', async () => {
       auditLogService.logAction.mockRejectedValueOnce(new Error('db down'));
 
-      const request = req({ user: undefined, method: 'POST', url: '/admin/metrics' });
+      const request = req({
+        user: undefined,
+        method: 'POST',
+        url: '/admin/metrics',
+      });
 
       await expect(guard.canActivate(buildContext(request))).rejects.toThrow(
         UnauthorizedException,

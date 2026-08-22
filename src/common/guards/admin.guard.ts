@@ -75,7 +75,7 @@ export class AdminGuard implements CanActivate {
           guard: AdminGuard.name,
         },
         ipAddress: extractClientIp(request),
-        userAgent: request.headers['user-agent'] as string | undefined,
+        userAgent: request.headers['user-agent'],
         resource: 'admin',
         result: 'FAILURE',
         errorMessage: message,
