@@ -19,6 +19,7 @@ import {
   ApiBody,
   ApiQuery,
 } from '@nestjs/swagger';
+import { Counter, Histogram, register } from 'prom-client';
 import { AuthService } from '../providers/auth.service';
 import { LocalAuthGuard } from 'src/common/guards/local-auth.guard';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -29,6 +30,45 @@ import {
   RegisterResponseDto,
   MessageResponseDto,
 } from '../dto/auth-response.dto';
+
+function getOrCreateCounter<T extends string>(
+  config: import('prom-client').CounterConfiguration<T>,
+): Counter<T> {
+  const existing = register.getSingleMetric(config.name);
+  if (existing) {
+    return existing as Counter<T>;
+  }
+  return new Counter<T>(config);
+}
+
+function getOrCreateHistogram<T extends string>(
+  config: import('prom-client').HistogramConfiguration<T>,
+): Histogram<T> {
+  const existing = register.getSingleMetric(config.name);
+  if (existing) {
+    return existing as Histogram<T>;
+  }
+  return new Histogram<T>(config);
+}
+
+export const authRequestsCounter = getOrCreateCounter({
+  name: 'auth_requests_total',
+  help: 'Total number of auth requests by endpoint and status',
+  labelNames: ['endpoint', 'status'] as const,
+});
+
+export const authRequestDurationHistogram = getOrCreateHistogram({
+  name: 'auth_request_duration_ms',
+  help: 'Duration of auth requests in milliseconds',
+  labelNames: ['endpoint', 'status'] as const,
+  buckets: [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+});
+
+export const authErrorsCounter = getOrCreateCounter({
+  name: 'auth_errors_total',
+  help: 'Total number of auth errors by endpoint and error type',
+  labelNames: ['endpoint', 'error_type'] as const,
+});
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -56,10 +96,32 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body(ValidationPipe) loginDto: LoginDto, @Request() req) {
-    return this.authService.login(req.user, {
-      ip: this.getClientIp(req),
-      userAgent: req.get?.('user-agent'),
-    });
+    const startTime = Date.now();
+    try {
+      const result = await this.authService.login(req.user, {
+        ip: this.getClientIp(req),
+        userAgent: req.get?.('user-agent'),
+      });
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'login', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'login', status: 'success' });
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'login', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'login', status: 'error' });
+      authErrorsCounter.inc({
+        endpoint: 'login',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   @ApiOperation({ summary: 'Refresh access token using a valid refresh token' })
@@ -77,10 +139,38 @@ export class AuthController {
   async refresh(
     @Body('refresh_token') refreshToken: string,
   ): Promise<{ access_token: string; refresh_token: string }> {
-    if (!refreshToken || typeof refreshToken !== 'string') {
-      return { access_token: '', refresh_token: '' };
+    const startTime = Date.now();
+    try {
+      if (!refreshToken || typeof refreshToken !== 'string') {
+        const durationMs = Date.now() - startTime;
+        authRequestDurationHistogram.observe(
+          { endpoint: 'refresh', status: 'bad_request' },
+          durationMs,
+        );
+        authRequestsCounter.inc({ endpoint: 'refresh', status: 'bad_request' });
+        return { access_token: '', refresh_token: '' };
+      }
+      const result = await this.authService.refreshTokens(refreshToken);
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'refresh', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'refresh', status: 'success' });
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'refresh', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'refresh', status: 'error' });
+      authErrorsCounter.inc({
+        endpoint: 'refresh',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
     }
-    return this.authService.refreshTokens(refreshToken);
   }
 
   @ApiOperation({ summary: 'Logout user and revoke current session' })
@@ -96,9 +186,30 @@ export class AuthController {
     @Headers('authorization') authorization?: string,
     @Body('refresh_token') refreshToken?: string,
   ): Promise<MessageResponseDto> {
-    const accessToken = this.extractBearerToken(authorization);
-    await this.authService.logout(accessToken, refreshToken);
-    return { message: 'Logged out successfully' };
+    const startTime = Date.now();
+    try {
+      const accessToken = this.extractBearerToken(authorization);
+      await this.authService.logout(accessToken, refreshToken);
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'logout', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'logout', status: 'success' });
+      return { message: 'Logged out successfully' };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'logout', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'logout', status: 'error' });
+      authErrorsCounter.inc({
+        endpoint: 'logout',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   @ApiOperation({ summary: 'Logout from all sessions (force-expire)' })
@@ -111,8 +222,29 @@ export class AuthController {
   @Post('logout-all')
   @HttpCode(HttpStatus.OK)
   async logoutAll(@Request() req): Promise<MessageResponseDto> {
-    await this.authService.forceExpireAllSessions(req.user.id);
-    return { message: 'All sessions revoked' };
+    const startTime = Date.now();
+    try {
+      await this.authService.forceExpireAllSessions(req.user.id);
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'logoutAll', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'logoutAll', status: 'success' });
+      return { message: 'All sessions revoked' };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'logoutAll', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'logoutAll', status: 'error' });
+      authErrorsCounter.inc({
+        endpoint: 'logoutAll',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   @ApiOperation({ summary: 'Register new user' })
@@ -135,7 +267,29 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body(ValidationPipe) registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
+    const startTime = Date.now();
+    try {
+      const result = await this.authService.register(registerDto);
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'register', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'register', status: 'success' });
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'register', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'register', status: 'error' });
+      authErrorsCounter.inc({
+        endpoint: 'register',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   @ApiOperation({ summary: 'Resend email verification' })
@@ -172,12 +326,50 @@ export class AuthController {
   async resendVerification(
     @Body('email') email: string,
   ): Promise<MessageResponseDto> {
-    // Sanitize: enforce max length and strip surrounding whitespace before processing
-    if (!email || typeof email !== 'string' || email.trim().length === 0) {
-      return { message: 'Verification email resent' }; // Fail silently to avoid user enumeration
+    const startTime = Date.now();
+    try {
+      // Sanitize: enforce max length and strip surrounding whitespace before processing
+      if (!email || typeof email !== 'string' || email.trim().length === 0) {
+        const durationMs = Date.now() - startTime;
+        authRequestDurationHistogram.observe(
+          { endpoint: 'resendVerification', status: 'empty' },
+          durationMs,
+        );
+        authRequestsCounter.inc({
+          endpoint: 'resendVerification',
+          status: 'empty',
+        });
+        return { message: 'Verification email resent' }; // Fail silently to avoid user enumeration
+      }
+      await this.authService.resendVerificationEmail(
+        email.trim().slice(0, 254),
+      );
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'resendVerification', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({
+        endpoint: 'resendVerification',
+        status: 'success',
+      });
+      return { message: 'Verification email resent' };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'resendVerification', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({
+        endpoint: 'resendVerification',
+        status: 'error',
+      });
+      authErrorsCounter.inc({
+        endpoint: 'resendVerification',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
     }
-    await this.authService.resendVerificationEmail(email.trim().slice(0, 254));
-    return { message: 'Verification email resent' };
   }
 
   @ApiOperation({ summary: 'Verify user email' })
@@ -200,8 +392,29 @@ export class AuthController {
   async verifyEmail(
     @Query('token') token: string,
   ): Promise<MessageResponseDto> {
-    await this.authService.verifyEmail(token);
-    return { message: 'Email verified successfully' };
+    const startTime = Date.now();
+    try {
+      await this.authService.verifyEmail(token);
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'verifyEmail', status: 'success' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'verifyEmail', status: 'success' });
+      return { message: 'Email verified successfully' };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      authRequestDurationHistogram.observe(
+        { endpoint: 'verifyEmail', status: 'error' },
+        durationMs,
+      );
+      authRequestsCounter.inc({ endpoint: 'verifyEmail', status: 'error' });
+      authErrorsCounter.inc({
+        endpoint: 'verifyEmail',
+        error_type: error?.name || 'Error',
+      });
+      throw error;
+    }
   }
 
   private getClientIp(req): string {
