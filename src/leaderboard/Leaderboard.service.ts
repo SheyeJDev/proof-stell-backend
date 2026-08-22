@@ -18,7 +18,6 @@ import { RealtimeGateway } from '../common/gateways/realtime.gateway';
 import { IdempotencyService } from '../common/services/idempotency.service';
 import { CacheService } from '../cache/cache.service';
 import { CacheKeys } from '../cache/decorators/cache.decorator';
-import { TrackMetrics } from '../common/metrics/metrics.decorator';
 
 function getOrCreateCounter<T extends string>(
   config: import('prom-client').CounterConfiguration<T>,
@@ -128,7 +127,6 @@ export class LeaderboardService {
    * console.log(`New rank: ${entry.rank}`);
    * ```
    */
-  @TrackMetrics({ category: 'leaderboard', trackDatabase: true, operation: 'submitScore' })
   async submitScore(
     userId: string,
     createLeaderboardDto: CreateLeaderboardDto,
@@ -305,7 +303,6 @@ export class LeaderboardService {
    * console.log(`Showing ${leaderboard.length} of ${total} entries`);
    * ```
    */
-  @TrackMetrics({ category: 'leaderboard', operation: 'getGlobalLeaderboard' })
   async getGlobalLeaderboard(
     page: number = 1,
     limit: number = 50,
@@ -368,7 +365,6 @@ export class LeaderboardService {
    * console.log(`User rank: ${entry.rank}, score: ${entry.score}`);
    * ```
    */
-  @TrackMetrics({ category: 'leaderboard', operation: 'getUserLeaderboard' })
   async getUserLeaderboard(userId: string): Promise<Leaderboard> {
     const startTime = Date.now();
     try {
@@ -423,7 +419,6 @@ export class LeaderboardService {
    * const entry = await leaderboardService.updateScore('user-id', { score: 2000 });
    * ```
    */
-  @TrackMetrics({ category: 'leaderboard', trackDatabase: true, operation: 'updateScore' })
   async updateScore(
     userId: string,
     updateLeaderboardDto: UpdateLeaderboardDto,
@@ -447,7 +442,6 @@ export class LeaderboardService {
    * ```
    */
   // Batched rank recalculation every 5 minutes
-  @TrackMetrics({ category: 'leaderboard', trackDatabase: true, operation: 'recalculateRanks' })
   @Cron('*/5 * * * *')
   public async recalculateRanks(): Promise<void> {
     const startTime = Date.now();
@@ -521,7 +515,6 @@ export class LeaderboardService {
    * await leaderboardService.forceRecalculateRanks();
    * ```
    */
-  @TrackMetrics({ category: 'leaderboard', trackDatabase: true, operation: 'forceRecalculateRanks' })
   async forceRecalculateRanks(): Promise<void> {
     await this.recalculateRanks();
   }
@@ -537,7 +530,6 @@ export class LeaderboardService {
    * await leaderboardService.resetLeaderboard();
    * ```
    */
-  @TrackMetrics({ category: 'leaderboard', trackDatabase: true, operation: 'resetLeaderboard' })
   async resetLeaderboard(): Promise<void> {
     const startTime = Date.now();
     try {

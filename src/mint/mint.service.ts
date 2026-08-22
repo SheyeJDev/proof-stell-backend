@@ -9,7 +9,6 @@ import { IdempotencyService } from 'src/common/services/idempotency.service';
 import { SagaBuilder } from 'src/common/saga/saga.builder';
 import { CacheService } from 'src/cache/cache.service';
 import { CacheKeys } from 'src/cache/decorators/cache.decorator';
-import { TrackMetrics } from 'src/common/metrics/metrics.decorator';
 
 function getOrCreateCounter<T extends string>(
   config: import('prom-client').CounterConfiguration<T>,
@@ -63,7 +62,6 @@ export class MintService {
     private readonly cacheService: CacheService,
   ) {}
 
-  @TrackMetrics({ category: 'mint', trackDatabase: true, operation: 'mint' })
   async mint(userId: number): Promise<Mint> {
     const startTime = Date.now();
     const mintLockKey = `mint:lock:${userId}`;
