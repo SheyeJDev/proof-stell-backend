@@ -183,5 +183,21 @@ This system provides:
 * 🧪 **Testability** → Easy mocking of config service
 * 📦 **Scalability** → Works across monorepos & microservices
 
+
 ---
 
+### Additional Auth/Wallet Environment Variables
+
+| Variable | Description |
+|---|---|
+| `JWT_ACCESS_TOKEN_TTL` | Access token lifetime (default `15m`) |
+| `JWT_REFRESH_TOKEN_TTL` | Refresh token lifetime (default `7d`) |
+| `JWT_REFRESH_SECRET` | Separate signing secret for refresh tokens (never reuse `JWT_SECRET`) |
+
+## 🔐 Security Caveats
+
+- `JWT_SECRET` / `JWT_REFRESH_SECRET` must be distinct, high-entropy values, rotated on any suspected leak — rotation invalidates all outstanding refresh tokens.
+- `BCRYPT_SALT_ROUNDS` below 10 is rejected by validation; 12 is the recommended production default.
+- `STARKNET_PRIVATE_KEY` must never be committed or logged — `LoggingInterceptor` redacts it by field name, but any new log call must not interpolate it manually.
+- `ALLOWED_ORIGINS` should be an explicit comma-separated allowlist in production; leaving `CORS_ENABLED` on with a wildcard origin defeats the credentialed-cookie/JWT model used by `/auth`.
+- Redis (`REDIS_HOST`/`REDIS_PORT`) backs both the response cache and the JWT revocation blacklist — if Redis is unreachable, revoked tokens may be treated as valid until Redis recovers (fails open); `HealthService.assertStartupDependencies()` blocks boot if Redis is unreachable at startup, but does not re-check at runtime.

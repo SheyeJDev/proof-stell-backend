@@ -18,6 +18,7 @@ import {
   ApiResponse,
   ApiBody,
   ApiQuery,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { Counter, Histogram, register } from 'prom-client';
 import { AuthService } from '../providers/auth.service';
@@ -179,6 +180,7 @@ export class AuthController {
     description: 'User logged out successfully',
     type: MessageResponseDto,
   })
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)

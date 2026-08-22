@@ -8,8 +8,11 @@ import {
   Body,
   Request,
 } from '@nestjs/common';
+import {
+  ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiBody,
+} from '@nestjs/swagger';
 import { WalletService } from './wallet.service';
-import type {
+import {
   ConnectWalletDto,
   SignMessageDto,
   SendTransactionDto,
@@ -34,6 +37,8 @@ interface AuthenticatedUser {
   role: string;
 }
 
+@ApiTags('Wallet')
+@ApiBearerAuth()
 @UseInterceptors(WalletErrorInterceptor, AuditLogInterceptor)
 @UseGuards(AuthGuard)
 @Controller('wallet')
@@ -41,6 +46,13 @@ export class WalletController {
   private readonly logger = new Logger(WalletController.name);
 
   constructor(private readonly walletService: WalletService) {}
+
+@ApiOperation({ summary: 'Connect a wallet provider (ArgentX or Braavos) for the authenticated user' })
+@ApiBody({ type: ConnectWalletDto })
+@ApiResponse({ status: 201, description: 'Wallet connected', })
+@ApiResponse({ status: 400, description: 'Unsupported or unavailable provider' })
+@ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
+@Post('connect')
 
   @Post('connect')
   async connectWallet(
@@ -107,6 +119,23 @@ export class WalletController {
     );
     return { signature };
   }
+
+@ApiOperation({
+  summary: 'Relay a signed transaction to the connected StarkNet wallet',
+  description:
+    'requestId is used as an idempotency key — a duplicate requestId for the same user within the dedup window returns the original transaction hash instead of re-submitting. chainId is validated against the wallet\u2019s currently connected network; a mismatch returns 409.',
+})
+@ApiBody({ type: SendTransactionDto })
+@ApiResponse({ status: 201, description: 'Transaction relayed, returns transactionHash' })
+@ApiResponse({ status: 400, description: 'Invalid transaction payload' })
+@ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
+@ApiResponse({ status: 409, description: 'chainId does not match the wallet\u2019s active network' })
+@Post('send-transaction')
+@AuditLog({
+  actionType: AUDIT_ACTIONS.TOKEN_TRANSFER,
+  resource: 'blockchain:transfer',
+  includeBody: true,
+})
 
   @Post('send-transaction')
   @AuditLog({

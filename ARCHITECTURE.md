@@ -130,3 +130,50 @@ POST /api/v1/wallet/send-transaction
 5. Instrument with `@AuditLog()` on mutation endpoints.
 6. Emit realtime events via `RealtimeGateway` if clients need live updates.
 7. See the [Contributor Checklist](CONTRIBUTING.md#contributor-checklist) before opening a PR.
+
+
+## API Contract: Auth
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `POST /api/v1/auth/login` | none (LocalAuthGuard) | 5 attempts / 5 min per IP. Returns `{ access_token, refresh_token, user }`. Access token TTL 15m, refresh 7d. |
+| `POST /api/v1/auth/refresh` | refresh token in body | 10 req / 60s per IP. Reused/expired refresh tokens are rejected (401) and revoke the token family. |
+| `POST /api/v1/auth/logout` | Bearer JWT | Revokes the current access token and, if provided, the paired refresh token. |
+| `POST /api/v1/auth/logout-all` | Bearer JWT | Force-expires every session for the user (`JwtSecurityService` blacklist). |
+| `POST /api/v1/auth/register` | none | 10 req / 10 min per IP. |
+| `GET /api/v1/auth/verify-email` | none | Token from the verification email, single use. |
+| `POST /api/v1/auth/resend-verification` | none | 3 req / hour per IP. Always returns 200 regardless of whether the email exists (anti-enumeration). |
+
+### Standard error payload
+
+All 4xx/5xx responses are shaped by `HttpExceptionFilter`:
+
+\`\`\`json
+{
+  "statusCode": 401,
+  "message": "Invalid credentials",
+  "error": "Unauthorized",
+  "path": "/api/v1/auth/login",
+  "requestId": "..."
+}
+\`\`\`
+
+429 responses (via `ThrottlerExceptionFilter`) additionally include a `retryAfter` (seconds) field.
+
+## API Contract: Wallet
+
+Lifecycle: `connect` → `sign-message` (optional) → `send-transaction` → `disconnect`.
+
+| Endpoint | Notes |
+|---|---|
+| `POST /api/v1/wallet/connect` | `providerName: 'argentx' \| 'braavos'`. 400 if provider unavailable. |
+| `GET /api/v1/wallet/status` \| `/accounts` \| `/chain-id` | Read-only, require an active connection (409 if not connected). |
+| `POST /api/v1/wallet/sign-message` | Returns `{ signature }`; does not touch chain state. |
+| `POST /api/v1/wallet/send-transaction` | **Idempotent** via `requestId` — a repeat `requestId` from the same user returns the original `transactionHash` instead of re-submitting. `chainId` is validated against the wallet's active network; mismatch → 409. Retried internally with exponential backoff on transient RPC failures before surfacing an error to the client. Audited via `@AuditLog(TOKEN_TRANSFER)`. |
+| `POST /api/v1/wallet/switch-network` | Emits `WalletEvents.NETWORK_SWITCHED`; in-flight transactions on the old network are not cancelled. |
+
+All wallet body DTOs are validated by the global `ValidationPipe` (`whitelist: true`, `forbidNonWhitelisted: true`) — unexpected fields in the request body return 400.
+
+## API Contract: Audit Logs (admin)
+
+All endpoints under `admin/audit-logs` require `JwtAuthGuard` + `AdminGuard`. `GET /` and the `user/:userId` / `action/:actionType` variants support pagination via `limit` (default 100). `POST /export` streams CSV or JSON per `format`. `POST /archive` requires `days >= 30` (400 otherwise) and permanently deletes matching rows.

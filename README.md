@@ -105,3 +105,33 @@ The translation module provides first-class locale support with consistent fallb
 ---
 
 **ProofStell Backend — Powering decentralized gaming.**
+
+
+## 🔑 API Flows
+
+- **Login/session** — `POST /auth/login` → `access_token` (15m) + `refresh_token` (7d) → `POST /auth/refresh` before expiry → `POST /auth/logout` or `/auth/logout-all` to revoke. See [ARCHITECTURE.md](ARCHITECTURE.md#api-contract-auth) for the full contract and error payload shape.
+- **Wallet** — `connect` → `sign-message` / `send-transaction` (idempotent via `requestId`, chain-validated) → `disconnect`. See [ARCHITECTURE.md](ARCHITECTURE.md#api-contract-wallet).
+- **Audit logs** — every `@AuditLog()`-decorated mutation is recorded immutably and queryable at `admin/audit-logs/*` (admin-only). See [ARCHITECTURE.md](ARCHITECTURE.md#api-contract-audit-logs-admin).
+
+## 🧪 Developer Quick-Start: Validating Auth & Wallet Flows
+
+\`\`\`bash
+npm install
+cp .env.example .env   # fill in JWT_SECRET, JWT_REFRESH_SECRET, DATABASE_URL, REDIS_HOST
+npm run start:dev
+
+# 1. Register + verify (dev mail catcher / logs show the token)
+curl -X POST localhost:3000/api/v1/auth/register -d '{"email":"a@b.com","password":"..."}' -H 'Content-Type: application/json'
+
+# 2. Login
+curl -X POST localhost:3000/api/v1/auth/login -d '{"email":"a@b.com","password":"..."}' -H 'Content-Type: application/json'
+# → { access_token, refresh_token }
+
+# 3. Connect a wallet (Bearer token from step 2)
+curl -X POST localhost:3000/api/v1/wallet/connect -H 'Authorization: Bearer <access_token>' -d '{"providerName":"argentx"}' -H 'Content-Type: application/json'
+
+# 4. Refresh before the 15m access token expires
+curl -X POST localhost:3000/api/v1/auth/refresh -d '{"refresh_token":"<refresh_token>"}' -H 'Content-Type: application/json'
+\`\`\`
+
+Full interactive Swagger docs (non-production only): `GET /api/docs`.
