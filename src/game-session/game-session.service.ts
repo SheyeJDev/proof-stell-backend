@@ -18,6 +18,7 @@ import { AchievementService } from '../badge/services/achievement.service';
 import { IdempotencyService } from '../common/services/idempotency.service';
 import { SagaBuilder } from '../common/saga/saga.builder';
 import { CacheService } from '../cache/cache.service';
+import { TrackMetrics } from '../common/metrics/metrics.decorator';
 import * as crypto from 'crypto';
 
 function getOrCreateCounter<T extends string>(
@@ -105,6 +106,7 @@ export class GameSessionService {
     private readonly cacheService: CacheService,
   ) {}
 
+  @TrackMetrics({ category: 'game-session', operation: 'startSession' })
   async startSession(
     userId: string,
     dto: StartSessionDto,
@@ -147,6 +149,7 @@ export class GameSessionService {
     }
   }
 
+  @TrackMetrics({ category: 'game-session', trackDatabase: true, operation: 'reportSession' })
   async reportSession(
     userId: string,
     reportSessionDto: ReportSessionDto,
@@ -429,6 +432,7 @@ export class GameSessionService {
     }
   }
 
+  @TrackMetrics({ category: 'game-session', operation: 'findSessionsByUser' })
   async findSessionsByUser(
     userId: string,
     requestingUser: { id: string; role: string },
@@ -485,6 +489,7 @@ export class GameSessionService {
     }
   }
 
+  @TrackMetrics({ category: 'game-session', operation: 'findSessionById' })
   async findSessionById(sessionId: string): Promise<GameSession> {
     const startTime = Date.now();
     try {
@@ -525,6 +530,7 @@ export class GameSessionService {
     }
   }
 
+  @TrackMetrics({ category: 'game-session', operation: 'getSessionAnalytics' })
   async getSessionAnalytics(
     userId?: string,
     challengeId?: string,
