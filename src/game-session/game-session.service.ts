@@ -150,12 +150,26 @@ export class GameSessionService {
   async reportSession(
     userId: string,
     reportSessionDto: ReportSessionDto,
+    isSuspicious: boolean = false,
+    suspicionReason?: string,
   ): Promise<GameSession> {
     const startTime = Date.now();
     const idempotencyKey = this.idempotencyService.generateKey(
       'report-session',
       `${userId}:${reportSessionDto.sessionId}`,
     );
+
+    // Log suspicious sessions for operational investigation
+    if (isSuspicious) {
+      this.logger.warn('Suspicious session reported', {
+        userId,
+        sessionId: reportSessionDto.sessionId,
+        reason: suspicionReason,
+        score: reportSessionDto.score,
+        duration: reportSessionDto.duration,
+        inputCount: reportSessionDto.inputs?.length,
+      });
+    }
 
     try {
       const cachedResult =
@@ -229,6 +243,20 @@ export class GameSessionService {
               gameSession.metadata = c.metadata;
               gameSession.isVerified = true;
               gameSession.nonceUsedAt = new Date();
+              
+              // Mark session as suspicious if flagged by guard
+              if (isSuspicious) {
+                gameSession.isSuspicious = true;
+                gameSession.suspicionReason = suspicionReason || 'Unknown';
+                // Include suspicion info in metadata for investigation
+                gameSession.metadata = {
+                  ...c.metadata,
+                  suspicion: {
+                    reason: suspicionReason,
+                    detectedAt: new Date().toISOString(),
+                  },
+                };
+              }
 
               c.savedSession = await c.queryRunner.manager.save(
                 GameSession,
