@@ -25,6 +25,8 @@ interface RequestWithUser extends Request {
     id: string;
     role: string;
   };
+  isSuspiciousSession?: boolean;
+  suspicionReason?: string;
 }
 
 @Controller('session')
@@ -64,12 +66,16 @@ export class GameSessionController {
     const session = await this.gameSessionService.reportSession(
       userId,
       reportSessionDto,
+      req.isSuspiciousSession || false,
+      req.suspicionReason,
     );
 
     return {
       message: 'Session reported successfully',
       sessionId: session.id,
       timestamp: session.createdAt,
+      isSuspicious: session.isSuspicious,
+      suspicionReason: session.suspicionReason,
     };
   }
 

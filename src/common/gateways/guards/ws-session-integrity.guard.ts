@@ -5,19 +5,8 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
-import { Request } from 'express';
-import { SessionIntegrityService } from '../services/session-integrity.service';
-
-interface User {
-  id: string;
-}
-
-interface CustomRequest extends Request {
-  user?: User;
-  isSuspiciousSession?: boolean;
-  suspicionReason?: string;
-}
+import { Socket } from 'socket.io';
+import { SessionIntegrityService } from '../../services/session-integrity.service';
 
 interface SessionData {
   duration: number;
@@ -26,27 +15,30 @@ interface SessionData {
   signature?: string;
 }
 
+interface CustomSocket extends Socket {
+  user?: { id: string; email: string; role: string };
+}
+
 @Injectable()
-export class SessionIntegrityGuard implements CanActivate {
-  private readonly logger = new Logger(SessionIntegrityGuard.name);
+export class WsSessionIntegrityGuard implements CanActivate {
+  private readonly logger = new Logger(WsSessionIntegrityGuard.name);
 
   constructor(
     private readonly sessionIntegrityService: SessionIntegrityService,
   ) {}
 
-  async canActivate(
-    context: ExecutionContext,
-  ): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<CustomRequest>();
-    const userId = request.user?.id;
-    
-    // Safe request body handling
-    if (!request.body) {
-      this.logger.warn('Request body is missing or null', { userId });
-      throw new BadRequestException('Request body is required');
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const client = context.switchToWs().getClient<CustomSocket>();
+    const payload = context.switchToWs().getData();
+    const userId = client.user?.id;
+
+    // Safe payload handling
+    if (!payload) {
+      this.logger.warn('WebSocket payload is missing or null', { userId });
+      throw new BadRequestException('Payload is required');
     }
 
-    const sessionData = request.body as SessionData;
+    const sessionData = payload as SessionData;
 
     // Validate required fields
     if (sessionData.duration === undefined || sessionData.duration === null) {
@@ -100,8 +92,8 @@ export class SessionIntegrityGuard implements CanActivate {
       });
       // Log for investigation but allow legitimate games to continue
       // Mark session for review instead of blocking
-      request.isSuspiciousSession = true;
-      request.suspicionReason = replayResult.reason;
+      (client as any).isSuspiciousSession = true;
+      (client as any).suspicionReason = replayResult.reason;
     }
 
     return true;

@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from './guards/ws-jwt.guard';
+import { WsSessionIntegrityGuard } from './guards/ws-session-integrity.guard';
 import { LoggingService } from '../../logging/logging.service';
 import { NotificationDto } from './dto/notification.dto';
 import { LeaderboardSubscribeDto } from './dto/leaderboard-subscribe.dto';
@@ -318,6 +319,57 @@ export class RealtimeGateway
     this.server
       .to(`user:${userId}`)
       .emit('notification:alert', { message: safeMessage, type, icon });
+  }
+
+  /**
+   * Handles game session reporting via WebSocket.
+   *
+   * Validates session integrity (timing, sequence, replay protection)
+   * before accepting the session report. Uses the same validation rules
+   * as HTTP routes for consistency.
+   */
+  @UseGuards(WsJwtGuard, WsSessionIntegrityGuard)
+  @SubscribeMessage('game:report-session')
+  async handleGameReportSession(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: unknown,
+  ) {
+    try {
+      const userId = this.connectedUsers.get(client.id);
+      if (!userId) return { error: 'Not authenticated' };
+
+      // Rate limit session reports: 10 per minute per user
+      if (!this.rateLimiter.isAllowed(userId, 'game:report-session', 10, 60_000)) {
+        return { error: 'Rate limit exceeded. Slow down.' };
+      }
+
+      // Check if session was flagged as suspicious by the integrity guard
+      const isSuspicious = (client as any).isSuspiciousSession;
+      const suspicionReason = (client as any).suspicionReason;
+
+      if (isSuspicious) {
+        this.loggingService.warn('Suspicious session detected via WebSocket', {
+          userId,
+          module: 'realtime',
+          action: 'game:report-session',
+          metadata: { reason: suspicionReason },
+        });
+      }
+
+      // Return success with suspicion status
+      return {
+        status: 'received',
+        isSuspicious: isSuspicious || false,
+        suspicionReason: suspicionReason || null,
+      };
+    } catch (err) {
+      this.loggingService.error(
+        'Error in game:report-session',
+        err instanceof Error ? err : new Error(String(err)),
+        { module: 'realtime', action: 'game:report-session' },
+      );
+      return { error: 'Session report failed' };
+    }
   }
 
   /**

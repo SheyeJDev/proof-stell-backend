@@ -36,6 +36,12 @@ export class GameSession {
   @Column('jsonb', { nullable: true })
   metadata: Record<string, any>;
 
+  @Column('boolean', { default: false })
+  isSuspicious: boolean;
+
+  @Column('varchar', { length: 255, nullable: true })
+  suspicionReason: string;
+
   @Column('varchar', { length: 64, nullable: true })
   nonce: string; // Cryptographically random string for server-side HMAC
 
