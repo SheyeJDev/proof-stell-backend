@@ -22,7 +22,9 @@ const mockProvider = {
   disconnect: jest.fn().mockResolvedValue(undefined),
   getAccounts: jest.fn().mockResolvedValue(['0xABC']),
   getChainId: jest.fn().mockResolvedValue('0x1'),
-  signMessage: jest.fn().mockResolvedValue({ r: '0xr', s: '0xs', v: '27', serialized: '0xsig' }),
+  signMessage: jest
+    .fn()
+    .mockResolvedValue({ r: '0xr', s: '0xs', v: '27', serialized: '0xsig' }),
   sendTransaction: jest.fn().mockResolvedValue({ hash: '0xtxhash' }),
   switchNetwork: jest.fn().mockResolvedValue(undefined),
 };
@@ -36,13 +38,19 @@ describe('WalletService', () => {
       providers: [
         WalletService,
         { provide: ConfigService, useValue: { get: jest.fn() } },
-        { provide: EventEmitter2, useValue: { emit: jest.fn(), on: jest.fn() } },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn(), on: jest.fn() },
+        },
         {
           provide: CacheService,
           useValue: {
             get: jest.fn().mockResolvedValue(undefined),
             set: jest.fn().mockResolvedValue(undefined),
-            acquireLock: jest.fn().mockResolvedValue({ key: 'wallet:transaction:user1:abc', token: 'token' }),
+            acquireLock: jest.fn().mockResolvedValue({
+              key: 'wallet:transaction:user1:abc',
+              token: 'token',
+            }),
             releaseLock: jest.fn().mockResolvedValue(true),
             setIfNotExists: jest.fn().mockResolvedValue(true),
             waitForValue: jest.fn().mockResolvedValue(undefined),
@@ -50,7 +58,14 @@ describe('WalletService', () => {
           },
         },
         { provide: ArgentXProvider, useValue: mockProvider },
-        { provide: BraavosProvider, useValue: { ...mockProvider, name: 'Braavos', isAvailable: jest.fn().mockReturnValue(false) } },
+        {
+          provide: BraavosProvider,
+          useValue: {
+            ...mockProvider,
+            name: 'Braavos',
+            isAvailable: jest.fn().mockReturnValue(false),
+          },
+        },
       ],
     }).compile();
 
@@ -58,7 +73,12 @@ describe('WalletService', () => {
     eventEmitter = module.get<EventEmitter2>(EventEmitter2);
     jest.clearAllMocks();
     mockProvider.isAvailable.mockReturnValue(true);
-    mockProvider.connect.mockResolvedValue({ isConnected: true, address: '0xABC', chainId: '0x1', providerName: 'MockProvider' });
+    mockProvider.connect.mockResolvedValue({
+      isConnected: true,
+      address: '0xABC',
+      chainId: '0x1',
+      providerName: 'MockProvider',
+    });
     mockProvider.getChainId.mockResolvedValue('0x1');
     mockProvider.sendTransaction.mockResolvedValue({ hash: '0xtxhash' });
   });
@@ -125,7 +145,12 @@ describe('WalletService', () => {
   describe('sendTransaction', () => {
     it('throws WalletNotConnectedException when not connected', async () => {
       await expect(
-        service.sendTransaction('user1', { to: '0xDEF', value: '100' }, '0xABC', 0),
+        service.sendTransaction(
+          'user1',
+          { to: '0xDEF', value: '100' },
+          '0xABC',
+          0,
+        ),
       ).rejects.toThrow(WalletNotConnectedException);
     });
 
@@ -141,7 +166,9 @@ describe('WalletService', () => {
     });
 
     it('returns cached transaction when the same requestId is reused', async () => {
-      const mockCache = (service as any).cacheService as unknown as { get: jest.Mock };
+      const mockCache = (service as any).cacheService as unknown as {
+        get: jest.Mock;
+      };
       mockCache.get.mockResolvedValueOnce({ hash: '0xcached' });
 
       await service.connect('user1', 'MockProvider');
@@ -159,9 +186,9 @@ describe('WalletService', () => {
 
   describe('signMessage', () => {
     it('throws WalletNotConnectedException when not connected', async () => {
-      await expect(service.signMessage('user1', 'hello', '0xABC')).rejects.toThrow(
-        WalletNotConnectedException,
-      );
+      await expect(
+        service.signMessage('user1', 'hello', '0xABC'),
+      ).rejects.toThrow(WalletNotConnectedException);
     });
 
     it('returns signature when connected', async () => {

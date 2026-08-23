@@ -243,7 +243,7 @@ export class GameSessionService {
               gameSession.metadata = c.metadata;
               gameSession.isVerified = true;
               gameSession.nonceUsedAt = new Date();
-              
+
               // Mark session as suspicious if flagged by guard
               if (isSuspicious) {
                 gameSession.isSuspicious = true;
@@ -286,7 +286,7 @@ export class GameSessionService {
               for (const batch of inputBatches) {
                 const inputEvents = batch.map((input) =>
                   c.queryRunner.manager.create(InputEvent, {
-                    gameSessionId: c.savedSession!.id,
+                    gameSessionId: c.savedSession.id,
                     eventType: input.eventType,
                     timestamp: input.timestamp,
                     eventData: input.eventData,
@@ -373,7 +373,7 @@ export class GameSessionService {
             'award-badges',
             async (c) => {
               const context = {
-                gameId: c.savedSession!.id,
+                gameId: c.savedSession.id,
                 score: c.score,
                 duration: c.duration,
                 triggerEvent: 'game_completion',
@@ -408,10 +408,10 @@ export class GameSessionService {
         await queryRunner.commitTransaction();
 
         this.logger.log(
-          `Game session reported successfully for user ${userId}, session ${ctx.savedSession!.id}`,
+          `Game session reported successfully for user ${userId}, session ${ctx.savedSession.id}`,
         );
 
-        const result = ctx.savedSession!;
+        const result = ctx.savedSession;
         await this.idempotencyService.store(idempotencyKey, result, 600000);
         const durationMs = Date.now() - startTime;
         gameSessionOperationDurationHistogram.observe(

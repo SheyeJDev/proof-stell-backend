@@ -48,7 +48,9 @@ describe('NotificationService', () => {
     );
     gateway = module.get<RealtimeGateway>(RealtimeGateway);
     // LoggingService mock is provided above; ensure service has it
-    (service as any).loggingService = module.get(require('../logging/logging.service').LoggingService);
+    (service as any).loggingService = module.get(
+      require('../logging/logging.service').LoggingService,
+    );
   });
 
   it('should be defined', () => {
@@ -106,9 +108,14 @@ describe('NotificationService', () => {
 
       // findOne returns existing for user u2 only
       (repo.findOne as any).mockImplementation(({ where }: any) =>
-        where.userId === 'u2' ? Promise.resolve({ id: 'existing' }) : Promise.resolve(undefined),
+        where.userId === 'u2'
+          ? Promise.resolve({ id: 'existing' })
+          : Promise.resolve(undefined),
       );
-      (repo.create as any).mockImplementation((input: any) => ({ ...input, isRead: false }));
+      (repo.create as any).mockImplementation((input: any) => ({
+        ...input,
+        isRead: false,
+      }));
       (repo.save as any).mockImplementation(async (items: any) => items);
 
       const result = await service.create(dto);
@@ -127,10 +134,27 @@ describe('NotificationService', () => {
         type: 'info',
         icon: '🔔',
       } as any;
-      (repo.create as any).mockImplementation((input: any) => ({ ...input, isRead: false }));
+      (repo.create as any).mockImplementation((input: any) => ({
+        ...input,
+        isRead: false,
+      }));
       const created = [
-        { userId: 'u1', title: 'Test', message: 'Hello', type: 'info', icon: '🔔', isRead: false },
-        { userId: 'u2', title: 'Test', message: 'Hello', type: 'info', icon: '🔔', isRead: false },
+        {
+          userId: 'u1',
+          title: 'Test',
+          message: 'Hello',
+          type: 'info',
+          icon: '🔔',
+          isRead: false,
+        },
+        {
+          userId: 'u2',
+          title: 'Test',
+          message: 'Hello',
+          type: 'info',
+          icon: '🔔',
+          isRead: false,
+        },
       ];
       (repo.save as any).mockResolvedValue(created);
 
@@ -141,10 +165,15 @@ describe('NotificationService', () => {
       });
 
       const logging = (service as any).loggingService;
-      const result = await service.create(dto as any);
+      const result = await service.create(dto);
       expect(gateway.emitNotification).toHaveBeenCalled();
       // Ensure u1 sent and u2 attempted and logged error
-      expect(gateway.emitNotification).toHaveBeenCalledWith('u1', 'Hello', 'info', '🔔');
+      expect(gateway.emitNotification).toHaveBeenCalledWith(
+        'u1',
+        'Hello',
+        'info',
+        '🔔',
+      );
       expect(logging.error).toHaveBeenCalled();
       expect(result).toEqual(created);
     });

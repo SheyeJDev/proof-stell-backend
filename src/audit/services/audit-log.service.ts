@@ -231,9 +231,7 @@ export class AuditLogService {
     const csvContent = [
       headers.join(','),
       ...rows.map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(','),
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','),
       ),
     ].join('\n');
 

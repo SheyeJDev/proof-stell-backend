@@ -103,13 +103,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (raw.length > MAX_BODY_LOG_LENGTH) return '[BODY_TOO_LARGE]';
 
     if (Array.isArray(body)) {
-      return (body as unknown[]).map(item => this.redactBody(item));
+      return (body as unknown[]).map((item) => this.redactBody(item));
     }
 
     return Object.fromEntries(
       Object.entries(body as Record<string, unknown>).map(([k, v]) => [
         k,
-        SENSITIVE_BODY_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : this.redactBody(v),
+        SENSITIVE_BODY_KEYS.has(k.toLowerCase())
+          ? '[REDACTED]'
+          : this.redactBody(v),
       ]),
     );
   }

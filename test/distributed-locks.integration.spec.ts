@@ -104,7 +104,11 @@ describe('Distributed Locks Integration Tests', () => {
       });
 
       expect(second).toBeNull();
-      const third = await cacheService.withLock(lockKey, 10000, async () => 'recovered');
+      const third = await cacheService.withLock(
+        lockKey,
+        10000,
+        async () => 'recovered',
+      );
       expect(third).toBe('recovered');
     });
   });
@@ -144,9 +148,11 @@ describe('Distributed Locks Integration Tests', () => {
     });
 
     it('should only submit one blockchain transaction for concurrent mint requests', async () => {
-      const mockExecute = jest.fn().mockResolvedValue({ transaction_hash: '0xhash' });
-      ;(blockchainService as any).account = { execute: mockExecute };
-      ;(blockchainService as any).cacheService = cacheService;
+      const mockExecute = jest
+        .fn()
+        .mockResolvedValue({ transaction_hash: '0xhash' });
+      (blockchainService as any).account = { execute: mockExecute };
+      (blockchainService as any).cacheService = cacheService;
 
       const calls: Promise<any>[] = [];
       for (let i = 0; i < 5; i++) {
@@ -156,9 +162,13 @@ describe('Distributed Locks Integration Tests', () => {
       const results = await Promise.all(calls);
 
       expect(results).toHaveLength(5);
-      const successResults = results.filter((r) => r !== null && r.transaction_hash);
+      const successResults = results.filter(
+        (r) => r !== null && r.transaction_hash,
+      );
       expect(mockExecute).toHaveBeenCalledTimes(1);
-      expect(successResults.every((r) => r.transaction_hash === '0xhash')).toBe(true);
+      expect(successResults.every((r) => r.transaction_hash === '0xhash')).toBe(
+        true,
+      );
     });
   });
 
@@ -185,13 +195,30 @@ describe('Distributed Locks Integration Tests', () => {
         getChainId: jest.fn().mockResolvedValue('0x1'),
         sendTransaction: jest.fn().mockResolvedValue({ hash: '0xtx' }),
       };
-      ;(walletService as any).providers = { mock: mockProvider };
-      ;(walletService as any).userState = { u1: { activeProviderName: 'mock', connectionStatus: { isConnected: true, address: '0xaddr', chainId: '0x1' } } };
+      (walletService as any).providers = { mock: mockProvider };
+      (walletService as any).userState = {
+        u1: {
+          activeProviderName: 'mock',
+          connectionStatus: {
+            isConnected: true,
+            address: '0xaddr',
+            chainId: '0x1',
+          },
+        },
+      };
 
-      const result = await walletService.sendTransaction('u1', { chainId: 1 }, '0xaddr');
+      const result = await walletService.sendTransaction(
+        'u1',
+        { chainId: 1 },
+        '0xaddr',
+      );
 
       expect(result.hash).toBe('0xtx');
-      expect(cacheService.acquireLock).toHaveBeenCalledWith('wallet:transaction:u1', 30000, 3);
+      expect(cacheService.acquireLock).toHaveBeenCalledWith(
+        'wallet:transaction:u1',
+        30000,
+        3,
+      );
       expect(cacheService.releaseLock).toHaveBeenCalled();
     });
   });
@@ -236,7 +263,10 @@ describe('Distributed Locks Integration Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           LeaderboardService,
-          { provide: getRepositoryToken(Leaderboard), useValue: mockRepository },
+          {
+            provide: getRepositoryToken(Leaderboard),
+            useValue: mockRepository,
+          },
           { provide: DataSource, useValue: mockDataSource },
           {
             provide: TypedConfigService,
@@ -259,16 +289,24 @@ describe('Distributed Locks Integration Tests', () => {
     });
 
     it('should skip recalculation when lock is not acquired', async () => {
-      const withLockSpy = jest.spyOn(cacheService, 'withLock').mockResolvedValue(null);
+      const withLockSpy = jest
+        .spyOn(cacheService, 'withLock')
+        .mockResolvedValue(null);
 
       await leaderboardService.recalculateRanks();
 
-      expect(withLockSpy).toHaveBeenCalledWith('leaderboard:recalculate', 30000, expect.any(Function));
+      expect(withLockSpy).toHaveBeenCalledWith(
+        'leaderboard:recalculate',
+        30000,
+        expect.any(Function),
+      );
       expect(mockDataSource.manager.query).not.toHaveBeenCalled();
     });
 
     it('should perform recalculation when lock is acquired', async () => {
-      const withLockSpy = jest.spyOn(cacheService, 'withLock').mockImplementation((_key, _ttl, callback) => callback());
+      const withLockSpy = jest
+        .spyOn(cacheService, 'withLock')
+        .mockImplementation((_key, _ttl, callback) => callback());
 
       await leaderboardService.recalculateRanks();
 
@@ -317,7 +355,9 @@ describe('Distributed Locks Integration Tests', () => {
       };
 
       mockLeaderboardService = {
-        submitScore: jest.fn().mockResolvedValue({ id: 1, userId: 'u1', score: 100, rank: 1 }),
+        submitScore: jest
+          .fn()
+          .mockResolvedValue({ id: 1, userId: 'u1', score: 100, rank: 1 }),
       };
 
       mockAchievementService = {
@@ -347,17 +387,26 @@ describe('Distributed Locks Integration Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           GameSessionService,
-          { provide: getRepositoryToken(GameSession), useValue: mockGameSessionRepository },
-          { provide: getRepositoryToken(InputEvent), useValue: mockInputEventRepository },
+          {
+            provide: getRepositoryToken(GameSession),
+            useValue: mockGameSessionRepository,
+          },
+          {
+            provide: getRepositoryToken(InputEvent),
+            useValue: mockInputEventRepository,
+          },
           { provide: getRepositoryToken(User), useValue: mockUserRepository },
           { provide: DataSource, useValue: mockDataSource },
           { provide: CacheService, useValue: cacheService },
           { provide: LeaderboardService, useValue: mockLeaderboardService },
-          { provide: IdempotencyService, useValue: {
-            generateKey: (op: string, id: string) => `${op}:${id}`,
-            check: jest.fn().mockResolvedValue(null),
-            store: jest.fn(),
-          }},
+          {
+            provide: IdempotencyService,
+            useValue: {
+              generateKey: (op: string, id: string) => `${op}:${id}`,
+              check: jest.fn().mockResolvedValue(null),
+              store: jest.fn(),
+            },
+          },
           { provide: AchievementService, useValue: mockAchievementService },
         ],
       }).compile();
@@ -376,7 +425,9 @@ describe('Distributed Locks Integration Tests', () => {
       mockQueryRunner.manager.save.mockResolvedValue({ id: 'session-1' });
       mockQueryRunner.manager.delete.mockResolvedValue(undefined);
 
-      jest.spyOn(gameSessionService as any, 'calculateSessionHash').mockReturnValue('fake-sig');
+      jest
+        .spyOn(gameSessionService as any, 'calculateSessionHash')
+        .mockReturnValue('fake-sig');
 
       await gameSessionService.reportSession('u1', {
         sessionId: 'session-1',
@@ -385,12 +436,25 @@ describe('Distributed Locks Integration Tests', () => {
         duration: 60,
         signature: 'fake-sig',
         metadata: {},
-        inputs: [{ eventType: InputEventType.CLICK, timestamp: Date.now(), eventData: {}, clientId: 'c1' }],
+        inputs: [
+          {
+            eventType: InputEventType.CLICK,
+            timestamp: Date.now(),
+            eventData: {},
+            clientId: 'c1',
+          },
+        ],
       });
 
-      expect(cacheService.acquireLock).toHaveBeenCalledWith(expect.stringContaining('leaderboard:user:u1'), 30000, 3);
+      expect(cacheService.acquireLock).toHaveBeenCalledWith(
+        expect.stringContaining('leaderboard:user:u1'),
+        30000,
+        3,
+      );
       expect(cacheService.releaseLock).toHaveBeenCalled();
-      expect(mockLeaderboardService.submitScore).toHaveBeenCalledWith('u1', { score: 100 });
+      expect(mockLeaderboardService.submitScore).toHaveBeenCalledWith('u1', {
+        score: 100,
+      });
     });
   });
 
@@ -409,7 +473,9 @@ describe('Distributed Locks Integration Tests', () => {
 
       mockBlockchainService = {
         sendMintTx: jest.fn().mockResolvedValue({ transaction_hash: '0xhash' }),
-        waitForTransactionReceipt: jest.fn().mockResolvedValue({ status: 'ACCEPTED_ON_L2', blockNumber: 1 }),
+        waitForTransactionReceipt: jest
+          .fn()
+          .mockResolvedValue({ status: 'ACCEPTED_ON_L2', blockNumber: 1 }),
       };
 
       mockIdempotencyService = {
@@ -436,7 +502,12 @@ describe('Distributed Locks Integration Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MintService,
-          { provide: getRepositoryToken(require('../src/mint/entities/mint.entity').Mint), useValue: mockMintRepository },
+          {
+            provide: getRepositoryToken(
+              require('../src/mint/entities/mint.entity').Mint,
+            ),
+            useValue: mockMintRepository,
+          },
           { provide: DataSource, useValue: mockDataSource },
           { provide: BlockchainService, useValue: mockBlockchainService },
           { provide: CacheService, useValue: cacheService },
@@ -450,7 +521,11 @@ describe('Distributed Locks Integration Tests', () => {
     it('should acquire mint lock before executing blockchain transaction', async () => {
       await mintService.mint(1);
 
-      expect(cacheService.withLock).toHaveBeenCalledWith(expect.stringContaining('mint:lock:1'), 30000, expect.any(Function));
+      expect(cacheService.withLock).toHaveBeenCalledWith(
+        expect.stringContaining('mint:lock:1'),
+        30000,
+        expect.any(Function),
+      );
       expect(mockBlockchainService.sendMintTx).toHaveBeenCalledWith(1);
     });
   });

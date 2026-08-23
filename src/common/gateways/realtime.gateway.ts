@@ -47,7 +47,12 @@ class WsRateLimiter {
    * @param limit   Max events per window
    * @param windowMs Window size in milliseconds
    */
-  isAllowed(userId: string, event: string, limit = 60, windowMs = 60_000): boolean {
+  isAllowed(
+    userId: string,
+    event: string,
+    limit = 60,
+    windowMs = 60_000,
+  ): boolean {
     const key = `${userId}:${event}`;
     const now = Date.now();
     const timestamps = (this.windows.get(key) ?? []).filter(
@@ -183,7 +188,9 @@ export class RealtimeGateway
       if (!userId) return { error: 'Not authenticated' };
 
       // Per-user rate limit: 60 subscription events/min
-      if (!this.rateLimiter.isAllowed(userId, 'leaderboard:subscribe', 60, 60_000)) {
+      if (
+        !this.rateLimiter.isAllowed(userId, 'leaderboard:subscribe', 60, 60_000)
+      ) {
         return { error: 'Rate limit exceeded. Slow down.' };
       }
 
@@ -195,7 +202,10 @@ export class RealtimeGateway
       return { event: 'subscribed', leaderboardId: dto.leaderboardId };
     } catch (err) {
       if (Array.isArray(err) && err[0] instanceof ValidationError) {
-        return { error: 'Invalid payload', details: 'leaderboardId must be a non-empty string' };
+        return {
+          error: 'Invalid payload',
+          details: 'leaderboardId must be a non-empty string',
+        };
       }
       this.loggingService.error(
         'Error in leaderboard:subscribe',
@@ -235,7 +245,10 @@ export class RealtimeGateway
       return { event: 'subscribed', gameId: dto.gameId };
     } catch (err) {
       if (Array.isArray(err) && err[0] instanceof ValidationError) {
-        return { error: 'Invalid payload', details: 'gameId must be a non-empty string' };
+        return {
+          error: 'Invalid payload',
+          details: 'gameId must be a non-empty string',
+        };
       }
       this.loggingService.error(
         'Error in game:subscribe',
@@ -339,7 +352,9 @@ export class RealtimeGateway
       if (!userId) return { error: 'Not authenticated' };
 
       // Rate limit session reports: 10 per minute per user
-      if (!this.rateLimiter.isAllowed(userId, 'game:report-session', 10, 60_000)) {
+      if (
+        !this.rateLimiter.isAllowed(userId, 'game:report-session', 10, 60_000)
+      ) {
         return { error: 'Rate limit exceeded. Slow down.' };
       }
 
@@ -390,7 +405,9 @@ export class RealtimeGateway
       if (user.role !== 'admin') return { error: 'Unauthorized' };
 
       // Rate limit admin notification sends: 30/min
-      if (!this.rateLimiter.isAllowed(user.sub, 'notification:send', 30, 60_000)) {
+      if (
+        !this.rateLimiter.isAllowed(user.sub, 'notification:send', 30, 60_000)
+      ) {
         return { error: 'Rate limit exceeded' };
       }
 

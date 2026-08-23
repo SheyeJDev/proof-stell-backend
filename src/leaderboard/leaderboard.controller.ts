@@ -103,7 +103,10 @@ export class LeaderboardController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.PLAYER, Role.ADMIN)
   @ApiOperation({ summary: 'Submit a leaderboard score' })
-  @ApiResponse({ status: 429, description: 'Score submit rate limit: 1 per second per user' })
+  @ApiResponse({
+    status: 429,
+    description: 'Score submit rate limit: 1 per second per user',
+  })
   // Leaderboard submit: 1 per second per user to prevent score-spam attacks
   @Throttle({ default: { ttl: 1, limit: 1 } })
   async submitScore(

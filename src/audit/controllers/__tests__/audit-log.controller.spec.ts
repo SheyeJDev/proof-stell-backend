@@ -3,7 +3,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { AuditLogController } from '../audit-log.controller';
 import { AuditLogService } from '../../services/audit-log.service';
 import type { GetAuditLogsDto } from '../../dto/audit-log.dto';
-import { jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 
 describe('AuditLogController', () => {
   let controller: AuditLogController;
@@ -55,7 +55,9 @@ describe('AuditLogController', () => {
     controller = module.get<AuditLogController>(AuditLogController);
     // Pull the mock straight back through NestJS — it's the same object
     // instance since `useValue` is a singleton-per-test.
-    const mockAuditLogService = (module.get(AuditLogService) as any) as typeof service;
+    const mockAuditLogService = module.get(
+      AuditLogService,
+    ) as any as typeof service;
     service = mockAuditLogService;
   });
 
@@ -152,18 +154,20 @@ describe('AuditLogController', () => {
     it('throws NotFoundException when the log is not found', async () => {
       (service.getLogById as jest.Mock<any>).mockResolvedValue(null);
 
-      await expect(
-        controller.getAuditLogById('nonexistent'),
-      ).rejects.toThrow(NotFoundException);
-      await expect(
-        controller.getAuditLogById('nonexistent'),
-      ).rejects.toThrow('Audit log with id "nonexistent" not found');
+      await expect(controller.getAuditLogById('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(controller.getAuditLogById('nonexistent')).rejects.toThrow(
+        'Audit log with id "nonexistent" not found',
+      );
     });
   });
 
   describe('getUserAuditLogs', () => {
     it('returns logs for a specific user', async () => {
-      (service.getLogsByUser as jest.Mock<any>).mockResolvedValue([mockAuditLog]);
+      (service.getLogsByUser as jest.Mock<any>).mockResolvedValue([
+        mockAuditLog,
+      ]);
 
       const result = await controller.getUserAuditLogs('user-123');
 
@@ -182,7 +186,9 @@ describe('AuditLogController', () => {
 
   describe('getActionAuditLogs', () => {
     it('returns logs for a specific action type', async () => {
-      (service.getLogsByActionType as jest.Mock<any>).mockResolvedValue([mockAuditLog]);
+      (service.getLogsByActionType as jest.Mock<any>).mockResolvedValue([
+        mockAuditLog,
+      ]);
 
       const result = await controller.getActionAuditLogs('USER_LOGIN');
 

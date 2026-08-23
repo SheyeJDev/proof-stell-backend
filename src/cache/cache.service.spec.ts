@@ -220,7 +220,10 @@ describe('CacheService', () => {
       const result = await service.acquireLock('test:lock', 30000, 3);
 
       expect(result).toEqual(lock);
-      expect(mockDistributedLockService.acquire).toHaveBeenCalledWith('test:lock', 30000);
+      expect(mockDistributedLockService.acquire).toHaveBeenCalledWith(
+        'test:lock',
+        30000,
+      );
     });
 
     it('should retry acquiring lock up to the specified retries', async () => {
@@ -292,10 +295,11 @@ describe('CacheService', () => {
       const error = new Error('work failed');
       const callback = jest.fn().mockRejectedValue(error);
 
-      await expect(service.withLock('test:lock', 30000, callback)).rejects.toThrow(error);
+      await expect(
+        service.withLock('test:lock', 30000, callback),
+      ).rejects.toThrow(error);
       expect(callback).toHaveBeenCalledTimes(1);
       expect(mockDistributedLockService.release).toHaveBeenCalledWith(lock);
     });
   });
 });
-

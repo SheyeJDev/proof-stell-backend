@@ -35,7 +35,7 @@ describe('Security Hardening', () => {
       const inputsError = errors.find((e) => e.property === 'inputs');
       expect(inputsError).toBeDefined();
       expect(
-        Object.values(inputsError!.constraints ?? {}).some((msg) =>
+        Object.values(inputsError.constraints ?? {}).some((msg) =>
           msg.toLowerCase().includes('array'),
         ),
       ).toBe(true);
@@ -207,10 +207,17 @@ describe('Security Hardening', () => {
     it('should allow requests within the limit', () => {
       // Inline the rate limiter logic for unit testing without instantiating the gateway
       const windows: Map<string, number[]> = new Map();
-      const isAllowed = (userId: string, event: string, limit: number, windowMs: number): boolean => {
+      const isAllowed = (
+        userId: string,
+        event: string,
+        limit: number,
+        windowMs: number,
+      ): boolean => {
         const key = `${userId}:${event}`;
         const now = Date.now();
-        const timestamps = (windows.get(key) ?? []).filter(t => now - t < windowMs);
+        const timestamps = (windows.get(key) ?? []).filter(
+          (t) => now - t < windowMs,
+        );
         if (timestamps.length >= limit) return false;
         timestamps.push(now);
         windows.set(key, timestamps);
@@ -224,10 +231,17 @@ describe('Security Hardening', () => {
 
     it('should block requests exceeding the limit', () => {
       const windows: Map<string, number[]> = new Map();
-      const isAllowed = (userId: string, event: string, limit: number, windowMs: number): boolean => {
+      const isAllowed = (
+        userId: string,
+        event: string,
+        limit: number,
+        windowMs: number,
+      ): boolean => {
         const key = `${userId}:${event}`;
         const now = Date.now();
-        const timestamps = (windows.get(key) ?? []).filter(t => now - t < windowMs);
+        const timestamps = (windows.get(key) ?? []).filter(
+          (t) => now - t < windowMs,
+        );
         if (timestamps.length >= limit) return false;
         timestamps.push(now);
         windows.set(key, timestamps);
@@ -242,10 +256,17 @@ describe('Security Hardening', () => {
 
     it('should not affect other users or events', () => {
       const windows: Map<string, number[]> = new Map();
-      const isAllowed = (userId: string, event: string, limit: number, windowMs: number): boolean => {
+      const isAllowed = (
+        userId: string,
+        event: string,
+        limit: number,
+        windowMs: number,
+      ): boolean => {
         const key = `${userId}:${event}`;
         const now = Date.now();
-        const timestamps = (windows.get(key) ?? []).filter(t => now - t < windowMs);
+        const timestamps = (windows.get(key) ?? []).filter(
+          (t) => now - t < windowMs,
+        );
         if (timestamps.length >= limit) return false;
         timestamps.push(now);
         windows.set(key, timestamps);

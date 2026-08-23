@@ -128,7 +128,10 @@ export class AuditLogController {
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     };
 
-    return this.auditLogService.exportLogs(filters, query.format as 'csv' | 'json');
+    return this.auditLogService.exportLogs(
+      filters,
+      query.format as 'csv' | 'json',
+    );
   }
 
   @Post('archive')
@@ -143,7 +146,8 @@ export class AuditLogController {
     if (isNaN(retentionDays) || retentionDays < 30) {
       throw new Error('Retention days must be at least 30');
     }
-    const deletedCount = await this.auditLogService.archiveOldLogs(retentionDays);
+    const deletedCount =
+      await this.auditLogService.archiveOldLogs(retentionDays);
     return {
       message: `Archived ${deletedCount} audit logs older than ${retentionDays} days`,
       deletedCount,

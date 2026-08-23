@@ -86,7 +86,8 @@ export class BadgeService {
       `${userId}:${badgeId}`,
     );
 
-    const cachedResult = await this.idempotencyService.check<UserBadge>(idempotencyKey);
+    const cachedResult =
+      await this.idempotencyService.check<UserBadge>(idempotencyKey);
     if (cachedResult) {
       return cachedResult;
     }

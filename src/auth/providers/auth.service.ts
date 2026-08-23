@@ -235,8 +235,11 @@ export class AuthService {
     }
 
     // rotateRefreshToken validates, rotates, and issues new tokens
-    const { accessToken, refreshToken: newRefreshToken, family } =
-      await this.authTokenService.rotateRefreshToken(refreshToken);
+    const {
+      accessToken,
+      refreshToken: newRefreshToken,
+      family,
+    } = await this.authTokenService.rotateRefreshToken(refreshToken);
 
     const user = await this.userService.findOne(decoded.sub);
     if (!user) {

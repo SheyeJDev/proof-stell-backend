@@ -14,7 +14,7 @@ import { Transform } from 'class-transformer';
 
 /**
  * Data transfer object for user registration.
- * 
+ *
  * This DTO validates and structures user registration requests,
  * ensuring all required fields are present and properly formatted.
  * It includes email validation, username constraints, and strong password requirements.
@@ -24,7 +24,7 @@ export class RegisterDto {
    * The user's email address.
    * Must be a valid email format and unique across the system.
    * Automatically normalized to lowercase and trimmed.
-   * 
+   *
    * @example "user@example.com"
    */
   @ApiProperty({
@@ -42,7 +42,7 @@ export class RegisterDto {
    * The user's unique username.
    * Must be alphanumeric with underscores only, 3-30 characters.
    * Automatically trimmed of whitespace.
-   * 
+   *
    * @example "player123"
    */
   @ApiProperty({
@@ -67,7 +67,7 @@ export class RegisterDto {
    * The user's password.
    * Must be 8-128 characters and contain at least one uppercase letter,
    * one lowercase letter, one number, and one special character.
-   * 
+   *
    * @example "SecurePass123!"
    */
   @ApiProperty({
@@ -89,7 +89,7 @@ export class RegisterDto {
 
   /**
    * Optional StarkNet wallet address for blockchain integration.
-   * 
+   *
    * @example "0x1234567890abcdef1234567890abcdef12345678"
    */
   @ApiPropertyOptional({

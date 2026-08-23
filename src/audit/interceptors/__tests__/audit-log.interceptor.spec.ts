@@ -7,7 +7,10 @@ import {
   type AuditLogMetadata,
   AUDIT_LOG_KEY,
 } from '../audit-log.interceptor';
-import { AuditLogService, type LogActionParams } from '../../services/audit-log.service';
+import {
+  AuditLogService,
+  type LogActionParams,
+} from '../../services/audit-log.service';
 import { jest } from '@jest/globals';
 
 describe('AuditLogInterceptor', () => {
@@ -30,11 +33,10 @@ describe('AuditLogInterceptor', () => {
     }) as unknown as ExecutionContext;
 
   beforeEach(async () => {
-    const mockAuditLogService: jest.Mocked<
-      Pick<AuditLogService, 'logAction'>
-    > = {
-      logAction: jest.fn(),
-    };
+    const mockAuditLogService: jest.Mocked<Pick<AuditLogService, 'logAction'>> =
+      {
+        logAction: jest.fn(),
+      };
 
     const mockReflector = {
       getAllAndOverride: jest.fn(),
@@ -50,13 +52,8 @@ describe('AuditLogInterceptor', () => {
     }).compile();
 
     interceptor = module.get<AuditLogInterceptor>(AuditLogInterceptor);
-    auditLogService = module.get(AuditLogService) as jest.Mocked<
-      Pick<AuditLogService, 'logAction'>
-    >;
-    reflector = module.get(Reflector) as unknown as {
-      getAllAndOverride: jest.Mock;
-      get: jest.Mock;
-    };
+    auditLogService = module.get(AuditLogService);
+    reflector = module.get(Reflector);
   });
 
   it('is defined', () => {

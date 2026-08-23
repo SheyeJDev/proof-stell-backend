@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { TypedConfigService } from '../common/config/typed-config.service';

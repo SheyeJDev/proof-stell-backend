@@ -37,6 +37,9 @@ export const validationSchema = Joi.object({
   // Notification delivery configuration
   NOTIFICATION_MAX_ATTEMPTS: Joi.number().integer().positive().default(5),
   NOTIFICATION_BASE_DELAY_MS: Joi.number().integer().positive().default(100),
-  NOTIFICATION_DEDUP_WINDOW_MS: Joi.number().integer().positive().default(300000),
+  NOTIFICATION_DEDUP_WINDOW_MS: Joi.number()
+    .integer()
+    .positive()
+    .default(300000),
   // Add more validations as needed
 });

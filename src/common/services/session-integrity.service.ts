@@ -122,7 +122,9 @@ export class SessionIntegrityService {
   }
 
   validateInputSequence(
-    inputs: Array<{ timestamp: number; sequence?: number; clientId?: string }> | undefined,
+    inputs:
+      | Array<{ timestamp: number; sequence?: number; clientId?: string }>
+      | undefined,
     userId?: string,
   ): ValidationResult {
     if (!inputs || inputs.length === 0) {
@@ -226,7 +228,7 @@ export class SessionIntegrityService {
     // Check if this exact session payload was recently processed
     const payloadHash = this.calculatePayloadHash(sessionData);
     const replayKey = `replay:${userId}:${payloadHash}`;
-    
+
     try {
       const existing = await this.cacheService.get(replayKey);
       if (existing) {
@@ -272,13 +274,34 @@ export class SessionIntegrityService {
     // Check for rapid session submissions (potential automation/replay)
     const rateLimitKey = `session_rate:${userId}`;
     try {
-      const recentSubmissions = await this.cacheService.get(rateLimitKey) as string | null;
-      const submissions = recentSubmissions ? JSON.parse(recentSubmissions) : [];
-      
+      const recentSubmissions = await this.cacheService.get(rateLimitKey);
+
+      // CacheService.get() resolves to `unknown` — narrow it to a string
+      // before parsing rather than assuming the shape of the cached value.
+      let submissions: number[] = [];
+      if (typeof recentSubmissions === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(recentSubmissions);
+          submissions = Array.isArray(parsed) ? (parsed as number[]) : [];
+        } catch (parseError) {
+          this.logger.error('Failed to parse rate limit cache entry', {
+            parseError,
+            userId,
+          });
+          submissions = [];
+        }
+      } else if (Array.isArray(recentSubmissions)) {
+        // Some cache clients (e.g. those with automatic JSON deserialization)
+        // may hand back an already-parsed array.
+        submissions = recentSubmissions as number[];
+      }
+
       const now = Date.now();
       const oneMinuteAgo = now - 60000;
-      const recentCount = submissions.filter((t: number) => t > oneMinuteAgo).length;
-      
+      const recentCount = submissions.filter(
+        (t: number) => t > oneMinuteAgo,
+      ).length;
+
       if (recentCount > 10) {
         return {
           isSuspicious: true,
@@ -290,7 +313,11 @@ export class SessionIntegrityService {
       // Update rate limit tracking
       submissions.push(now);
       const filtered = submissions.filter((t: number) => t > oneMinuteAgo);
-      await this.cacheService.set(rateLimitKey, JSON.stringify(filtered), 120000);
+      await this.cacheService.set(
+        rateLimitKey,
+        JSON.stringify(filtered),
+        120000,
+      );
     } catch (error) {
       this.logger.error('Failed to check rate limit cache', { error, userId });
     }
@@ -303,9 +330,10 @@ export class SessionIntegrityService {
       duration: sessionData.duration,
       inputCount: sessionData.inputs?.length || 0,
       firstTimestamp: sessionData.inputs?.[0]?.timestamp || 0,
-      lastTimestamp: sessionData.inputs?.[sessionData.inputs.length - 1]?.timestamp || 0,
+      lastTimestamp:
+        sessionData.inputs?.[sessionData.inputs.length - 1]?.timestamp || 0,
     };
-    
+
     // Simple hash for detection (not cryptographic)
     return JSON.stringify(dataToHash);
   }

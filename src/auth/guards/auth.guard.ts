@@ -74,10 +74,7 @@ export class AuthGuard implements CanActivate {
     token: string,
   ): string {
     const tokenId =
-      payload?.jti ||
-      createHash('sha256')
-        .update(token)
-        .digest('hex');
+      payload?.jti || createHash('sha256').update(token).digest('hex');
 
     return `${this.revokedTokenPrefix}${tokenId}`;
   }

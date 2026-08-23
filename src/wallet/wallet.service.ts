@@ -77,7 +77,7 @@ export class WalletService {
         operationNonce: 0,
       });
     }
-    return this.userState.get(userId)!;
+    return this.userState.get(userId);
   }
 
   /**
@@ -87,7 +87,10 @@ export class WalletService {
    * user state remains in its previous (disconnected) position so we
    * never leave a half-connected record.
    */
-  async connect(userId: string, providerName: string): Promise<WalletConnectionStatus> {
+  async connect(
+    userId: string,
+    providerName: string,
+  ): Promise<WalletConnectionStatus> {
     const provider = this.getProvider(providerName);
     // Snapshot previous state so we can roll back on failure
     const prevState = this.getUserState(userId);
@@ -111,11 +114,16 @@ export class WalletService {
       // Roll back to the previous state so we don't leave a half-connected record
       prevState.activeProviderName = prevProviderName;
       prevState.connectionStatus = prevStatus;
-      this.logger.error(`User ${userId}: failed to connect to ${providerName}: ${error.message}`);
-      this.emitEvent<WalletConnectionErrorEvent>(WalletEvents.CONNECTION_ERROR, {
-        providerName,
-        error: { code: error.name, message: error.message },
-      });
+      this.logger.error(
+        `User ${userId}: failed to connect to ${providerName}: ${error.message}`,
+      );
+      this.emitEvent<WalletConnectionErrorEvent>(
+        WalletEvents.CONNECTION_ERROR,
+        {
+          providerName,
+          error: { code: error.name, message: error.message },
+        },
+      );
       throw error;
     }
   }
@@ -148,7 +156,9 @@ export class WalletService {
         chainId,
       });
     } catch (error) {
-      this.logger.error(`User ${userId}: provider disconnect failed: ${error.message}`);
+      this.logger.error(
+        `User ${userId}: provider disconnect failed: ${error.message}`,
+      );
       this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
         providerName,
         error: { code: error.name, message: error.message },
@@ -201,7 +211,11 @@ export class WalletService {
     }
   }
 
-  async signMessage(userId: string, message: string, address: string): Promise<Signature> {
+  async signMessage(
+    userId: string,
+    message: string,
+    address: string,
+  ): Promise<Signature> {
     const state = this.getUserState(userId);
     if (!state.activeProviderName) {
       throw new WalletNotConnectedException();
@@ -247,18 +261,18 @@ export class WalletService {
     });
     const lockKey = `wallet:transaction:${userId}:${requestId}`;
 
-    const existing = await this.cacheService.get<{ hash: string; status?: string }>(cacheKey);
+    const existing = await this.cacheService.get<{
+      hash: string;
+      status?: string;
+    }>(cacheKey);
     if (existing?.hash) {
       return existing;
     }
 
     if (existing?.status === 'pending') {
-      const pendingResult = await this.cacheService.waitForValue<{ hash: string }>(
-        cacheKey,
-        30000,
-        200,
-        (value) => !!value?.hash,
-      );
+      const pendingResult = await this.cacheService.waitForValue<{
+        hash: string;
+      }>(cacheKey, 30000, 200, (value) => !!value?.hash);
       if (pendingResult) {
         return pendingResult;
       }
@@ -266,7 +280,9 @@ export class WalletService {
 
     const lock = await this.cacheService.acquireLock(lockKey, 30000, retries);
     if (!lock) {
-      const retryCached = await this.cacheService.get<{ hash: string }>(cacheKey);
+      const retryCached = await this.cacheService.get<{ hash: string }>(
+        cacheKey,
+      );
       if (retryCached) {
         return retryCached;
       }
@@ -282,19 +298,22 @@ export class WalletService {
       }
       const provider = this.getProvider(state.activeProviderName);
 
-      const doubleCheck = await this.cacheService.get<{ hash: string }>(cacheKey);
+      const doubleCheck = await this.cacheService.get<{ hash: string }>(
+        cacheKey,
+      );
       if (doubleCheck) {
         return doubleCheck;
       }
 
-      const reserved = await this.cacheService.setIfNotExists(cacheKey, { status: 'pending' }, 30);
+      const reserved = await this.cacheService.setIfNotExists(
+        cacheKey,
+        { status: 'pending' },
+        30,
+      );
       if (!reserved) {
-        const pendingResult = await this.cacheService.waitForValue<{ hash: string }>(
-          cacheKey,
-          30000,
-          200,
-          (value) => !!value?.hash,
-        );
+        const pendingResult = await this.cacheService.waitForValue<{
+          hash: string;
+        }>(cacheKey, 30000, 200, (value) => !!value?.hash);
         if (pendingResult) {
           return pendingResult;
         }
@@ -303,15 +322,21 @@ export class WalletService {
       for (let i = 0; i <= retries; i++) {
         try {
           const currentChainId = await provider.getChainId();
-          if (transaction.chainId && transaction.chainId.toString() !== currentChainId) {
+          if (
+            transaction.chainId &&
+            transaction.chainId.toString() !== currentChainId
+          ) {
             try {
               await provider.switchNetwork(transaction.chainId.toString());
-              this.emitEvent<WalletNetworkSwitchedEvent>(WalletEvents.NETWORK_SWITCHED, {
-                providerName: state.activeProviderName,
-                address,
-                oldChainId: currentChainId,
-                newChainId: transaction.chainId.toString(),
-              });
+              this.emitEvent<WalletNetworkSwitchedEvent>(
+                WalletEvents.NETWORK_SWITCHED,
+                {
+                  providerName: state.activeProviderName,
+                  address,
+                  oldChainId: currentChainId,
+                  newChainId: transaction.chainId.toString(),
+                },
+              );
               state.connectionStatus.chainId = transaction.chainId.toString();
               continue;
             } catch (switchError) {
@@ -324,23 +349,29 @@ export class WalletService {
 
           const result = await provider.sendTransaction(transaction, address);
           await this.cacheService.set(cacheKey, result, 3600);
-          this.emitEvent<WalletTransactionSentEvent>(WalletEvents.TRANSACTION_SENT, {
-            providerName: state.activeProviderName,
-            address,
-            chainId: currentChainId,
-            transactionHash: result.hash,
-            transactionDetails: transaction,
-          });
+          this.emitEvent<WalletTransactionSentEvent>(
+            WalletEvents.TRANSACTION_SENT,
+            {
+              providerName: state.activeProviderName,
+              address,
+              chainId: currentChainId,
+              transactionHash: result.hash,
+              transactionDetails: transaction,
+            },
+          );
           return result;
         } catch (error) {
           if (error instanceof UserRejectedTransactionException) {
-            this.emitEvent<WalletTransactionRejectedEvent>(WalletEvents.TRANSACTION_REJECTED, {
-              providerName: state.activeProviderName,
-              address,
-              chainId: state.connectionStatus.chainId,
-              transactionDetails: transaction,
-              error: { code: 'USER_REJECTED', message: error.message },
-            });
+            this.emitEvent<WalletTransactionRejectedEvent>(
+              WalletEvents.TRANSACTION_REJECTED,
+              {
+                providerName: state.activeProviderName,
+                address,
+                chainId: state.connectionStatus.chainId,
+                transactionDetails: transaction,
+                error: { code: 'USER_REJECTED', message: error.message },
+              },
+            );
             throw error;
           } else if (error instanceof NetworkMismatchException) {
             this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
@@ -352,7 +383,9 @@ export class WalletService {
             throw error;
           }
 
-          const retryCached = await this.cacheService.get<{ hash: string }>(cacheKey);
+          const retryCached = await this.cacheService.get<{ hash: string }>(
+            cacheKey,
+          );
           if (retryCached) {
             return retryCached;
           }
@@ -377,7 +410,9 @@ export class WalletService {
     } finally {
       await this.cacheService.releaseLock(lock);
     }
-    throw new TransactionFailedException('Unknown error during transaction sending.');
+    throw new TransactionFailedException(
+      'Unknown error during transaction sending.',
+    );
   }
 
   async switchNetwork(userId: string, chainId: string): Promise<void> {
@@ -390,12 +425,15 @@ export class WalletService {
     try {
       await provider.switchNetwork(chainId);
       state.connectionStatus.chainId = chainId;
-      this.emitEvent<WalletNetworkSwitchedEvent>(WalletEvents.NETWORK_SWITCHED, {
-        providerName: state.activeProviderName,
-        address: state.connectionStatus.address,
-        oldChainId,
-        newChainId: chainId,
-      });
+      this.emitEvent<WalletNetworkSwitchedEvent>(
+        WalletEvents.NETWORK_SWITCHED,
+        {
+          providerName: state.activeProviderName,
+          address: state.connectionStatus.address,
+          oldChainId,
+          newChainId: chainId,
+        },
+      );
     } catch (error) {
       this.emitEvent<WalletErrorEvent>(WalletEvents.ERROR, {
         providerName: state.activeProviderName,
@@ -420,20 +458,42 @@ export class WalletService {
   }
 
   onModuleInit() {
-    this.eventEmitter.on(WalletEvents.CONNECTED, (event: WalletConnectedEvent) => {
-      this.logger.log(`[EVENT] Wallet Connected: ${event.providerName} - ${event.address} on ${event.chainId}`);
-    });
-    this.eventEmitter.on(WalletEvents.DISCONNECTED, (event: WalletDisconnectedEvent) => {
-      this.logger.log(`[EVENT] Wallet Disconnected: ${event.providerName} - ${event.address}`);
-    });
-    this.eventEmitter.on(WalletEvents.TRANSACTION_REJECTED, (event: WalletTransactionRejectedEvent) => {
-      this.logger.warn(`[EVENT] Transaction Rejected: ${event.providerName} - ${event.address}`);
-    });
-    this.eventEmitter.on(WalletEvents.NETWORK_SWITCHED, (event: WalletNetworkSwitchedEvent) => {
-      this.logger.log(`[EVENT] Network Switched: ${event.providerName} - ${event.oldChainId} to ${event.newChainId}`);
-    });
+    this.eventEmitter.on(
+      WalletEvents.CONNECTED,
+      (event: WalletConnectedEvent) => {
+        this.logger.log(
+          `[EVENT] Wallet Connected: ${event.providerName} - ${event.address} on ${event.chainId}`,
+        );
+      },
+    );
+    this.eventEmitter.on(
+      WalletEvents.DISCONNECTED,
+      (event: WalletDisconnectedEvent) => {
+        this.logger.log(
+          `[EVENT] Wallet Disconnected: ${event.providerName} - ${event.address}`,
+        );
+      },
+    );
+    this.eventEmitter.on(
+      WalletEvents.TRANSACTION_REJECTED,
+      (event: WalletTransactionRejectedEvent) => {
+        this.logger.warn(
+          `[EVENT] Transaction Rejected: ${event.providerName} - ${event.address}`,
+        );
+      },
+    );
+    this.eventEmitter.on(
+      WalletEvents.NETWORK_SWITCHED,
+      (event: WalletNetworkSwitchedEvent) => {
+        this.logger.log(
+          `[EVENT] Network Switched: ${event.providerName} - ${event.oldChainId} to ${event.newChainId}`,
+        );
+      },
+    );
     this.eventEmitter.on(WalletEvents.ERROR, (event: WalletErrorEvent) => {
-      this.logger.error(`[EVENT] Wallet Error: ${event.providerName} - ${event.error?.code}: ${event.error?.message}`);
+      this.logger.error(
+        `[EVENT] Wallet Error: ${event.providerName} - ${event.error?.code}: ${event.error?.message}`,
+      );
     });
   }
 }

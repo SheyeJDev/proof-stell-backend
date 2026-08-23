@@ -188,9 +188,8 @@ export class AuthTokenService {
 
     // Fetch family metadata
     const familyKey = this.buildRefreshFamilyKey(claims.family);
-    const familyMeta = await this.cacheService.get<RefreshFamilyMetadata>(
-      familyKey,
-    );
+    const familyMeta =
+      await this.cacheService.get<RefreshFamilyMetadata>(familyKey);
 
     if (!familyMeta) {
       // Unknown family — token was issued against a family that has already
@@ -218,7 +217,11 @@ export class AuthTokenService {
       // This is a stale / already-rotated token from the same family.
       // Mark family as reused (compromised).
       familyMeta.reused = true;
-      await this.cacheService.set(familyKey, familyMeta, this.getRefreshTtlSeconds());
+      await this.cacheService.set(
+        familyKey,
+        familyMeta,
+        this.getRefreshTtlSeconds(),
+      );
       await this.revokeRefreshFamily(claims.family, claims.sub);
       this.logger.warn(
         `Refresh token reuse detected: token jti=${claims.jti} != current jti=${familyMeta.currentTokenId} for family ${claims.family}`,
@@ -245,7 +248,11 @@ export class AuthTokenService {
 
     // Update family to point to the new token
     familyMeta.currentTokenId = newJti;
-    await this.cacheService.set(familyKey, familyMeta, this.getRefreshTtlSeconds());
+    await this.cacheService.set(
+      familyKey,
+      familyMeta,
+      this.getRefreshTtlSeconds(),
+    );
 
     // Issue a new access token
     const accessToken = this.signAccessToken({
@@ -271,8 +278,7 @@ export class AuthTokenService {
    */
   async revokeAllUserRefreshTokens(userId: string): Promise<void> {
     const familiesKey = this.buildUserSessionsKey(userId);
-    const families =
-      (await this.cacheService.get<string[]>(familiesKey)) || [];
+    const families = (await this.cacheService.get<string[]>(familiesKey)) || [];
 
     for (const family of families) {
       await this.revokeRefreshFamily(family, userId);
@@ -291,9 +297,11 @@ export class AuthTokenService {
    * Used by AuthService to extract userId from a refresh token during
    * rotation / logout flows.
    */
-  decodeRefreshToken(token: string): { sub: string; jti: string; family: string } | null {
+  decodeRefreshToken(
+    token: string,
+  ): { sub: string; jti: string; family: string } | null {
     try {
-      return this.jwtService.decode(token) as { sub: string; jti: string; family: string } | null;
+      return this.jwtService.decode(token);
     } catch {
       return null;
     }
@@ -337,8 +345,7 @@ export class AuthTokenService {
     family: string,
   ): Promise<void> {
     const key = this.buildUserSessionsKey(userId);
-    const families =
-      (await this.cacheService.get<string[]>(key)) || [];
+    const families = (await this.cacheService.get<string[]>(key)) || [];
     if (!families.includes(family)) {
       families.push(family);
       await this.cacheService.set(key, families, this.getRefreshTtlSeconds());

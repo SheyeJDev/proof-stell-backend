@@ -57,8 +57,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.PASSWORD_CHANGE,
@@ -85,8 +89,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.TOKEN_MINT,
@@ -119,8 +127,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.TOKEN_TRANSFER,
@@ -153,8 +165,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.USER_CREATED,
@@ -185,8 +201,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.USER_DELETED,
@@ -217,8 +237,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.ADMIN_ROLE_ASSIGNED,
@@ -249,8 +273,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.SESSION_STARTED,
@@ -281,8 +309,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.SESSION_REPORTED,
@@ -316,8 +348,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.USER_PROFILE_UPDATED,
@@ -358,8 +394,12 @@ describe('Audit Logging Integration Tests', () => {
         result: 'SUCCESS',
       };
 
-      jest.spyOn(auditLogRepository, 'create').mockReturnValue(mockAuditLog as any);
-      jest.spyOn(auditLogRepository, 'save').mockResolvedValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'create')
+        .mockReturnValue(mockAuditLog as any);
+      jest
+        .spyOn(auditLogRepository, 'save')
+        .mockResolvedValue(mockAuditLog as any);
 
       await auditLogService.logAction({
         actionType: AUDIT_ACTIONS.PASSWORD_CHANGE,
@@ -400,7 +440,9 @@ describe('Audit Logging Integration Tests', () => {
         },
       ];
 
-      jest.spyOn(auditLogRepository, 'findAndCount').mockResolvedValue([mockLogs, 1]);
+      jest
+        .spyOn(auditLogRepository, 'findAndCount')
+        .mockResolvedValue([mockLogs, 1]);
 
       const result = await auditLogService.findLogs({ userId: 'user-123' });
 
@@ -419,7 +461,9 @@ describe('Audit Logging Integration Tests', () => {
         },
       ];
 
-      jest.spyOn(auditLogRepository, 'findAndCount').mockResolvedValue([mockLogs, 1]);
+      jest
+        .spyOn(auditLogRepository, 'findAndCount')
+        .mockResolvedValue([mockLogs, 1]);
 
       const result = await auditLogService.findLogs({
         actionType: AUDIT_ACTIONS.TOKEN_MINT,
@@ -443,7 +487,9 @@ describe('Audit Logging Integration Tests', () => {
         },
       ];
 
-      jest.spyOn(auditLogRepository, 'findAndCount').mockResolvedValue([mockLogs, 1]);
+      jest
+        .spyOn(auditLogRepository, 'findAndCount')
+        .mockResolvedValue([mockLogs, 1]);
 
       const result = await auditLogService.exportLogs({}, 'csv');
 
@@ -466,7 +512,9 @@ describe('Audit Logging Integration Tests', () => {
         },
       ];
 
-      jest.spyOn(auditLogRepository, 'findAndCount').mockResolvedValue([mockLogs, 1]);
+      jest
+        .spyOn(auditLogRepository, 'findAndCount')
+        .mockResolvedValue([mockLogs, 1]);
 
       const result = await auditLogService.exportLogs({}, 'json');
 

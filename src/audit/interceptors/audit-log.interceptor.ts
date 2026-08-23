@@ -49,7 +49,9 @@ export class AuditLogInterceptor implements NestInterceptor {
     }
 
     const request = context.switchToHttp().getRequest<Request>();
-    const user = request.user as { id?: string; role?: string; permissions?: string[] } | undefined;
+    const user = request.user as
+      | { id?: string; role?: string; permissions?: string[] }
+      | undefined;
 
     if (!user?.id) {
       // Without identity we have nothing to attribute the action to.
@@ -106,7 +108,9 @@ export class AuditLogInterceptor implements NestInterceptor {
           }),
           catchError((auditErr: unknown) => {
             const aErr =
-              auditErr instanceof Error ? auditErr : new Error(String(auditErr));
+              auditErr instanceof Error
+                ? auditErr
+                : new Error(String(auditErr));
             this.logger.error(
               `Audit log write for ERROR result did not complete in ${AUDIT_WRITE_TIMEOUT_MS}ms (action=${auditMetadata.actionType}): ${aErr.message}`,
             );
@@ -168,7 +172,7 @@ export class AuditLogInterceptor implements NestInterceptor {
         userId,
         metadata: logMetadata,
         ipAddress: extractClientIp(request),
-        userAgent: request.headers['user-agent'] as string | undefined,
+        userAgent: request.headers['user-agent'],
         resource: metadata.resource,
         result,
         errorMessage,

@@ -30,7 +30,10 @@ describe('RolesGuard', () => {
   beforeEach(() => {
     reflector = new Reflector();
     auditLogService = { logAction: jest.fn().mockResolvedValue(undefined) };
-    guard = new RolesGuard(reflector, auditLogService as unknown as AuditLogService);
+    guard = new RolesGuard(
+      reflector,
+      auditLogService as unknown as AuditLogService,
+    );
   });
 
   it('allows access when no roles metadata is set', async () => {
@@ -68,9 +71,9 @@ describe('RolesGuard', () => {
 
   it('denies an unauthenticated request', async () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
-    await expect(
-      guard.canActivate(buildContext(undefined)),
-    ).rejects.toThrow(UnauthorizedException);
+    await expect(guard.canActivate(buildContext(undefined))).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('uses exact enum comparison — does not grant access on partial string match', async () => {

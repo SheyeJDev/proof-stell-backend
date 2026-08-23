@@ -54,7 +54,7 @@ describe('AuditLogService', () => {
     }).compile();
 
     service = module.get<AuditLogService>(AuditLogService);
-    repository = module.get(getRepositoryToken(AuditLog)) as MockAuditLogRepo;
+    repository = module.get(getRepositoryToken(AuditLog));
   });
 
   it('should be defined', () => {
@@ -73,8 +73,8 @@ describe('AuditLogService', () => {
         result: 'SUCCESS',
       };
 
-      (repository.create as jest.Mock).mockReturnValue(mockAuditLog);
-      (repository.save as jest.Mock).mockResolvedValue(mockAuditLog);
+      repository.create.mockReturnValue(mockAuditLog);
+      repository.save.mockResolvedValue(mockAuditLog);
 
       const result = await service.logAction(params);
 
@@ -98,8 +98,8 @@ describe('AuditLogService', () => {
         userId: 'user-123',
       };
 
-      (repository.create as jest.Mock).mockReturnValue(mockAuditLog);
-      (repository.save as jest.Mock).mockResolvedValue(mockAuditLog);
+      repository.create.mockReturnValue(mockAuditLog);
+      repository.save.mockResolvedValue(mockAuditLog);
 
       await service.logAction(params);
 
@@ -122,8 +122,8 @@ describe('AuditLogService', () => {
       };
 
       const error = new Error('Database error');
-      (repository.create as jest.Mock).mockReturnValue(mockAuditLog);
-      (repository.save as jest.Mock).mockRejectedValue(error);
+      repository.create.mockReturnValue(mockAuditLog);
+      repository.save.mockRejectedValue(error);
 
       await expect(service.logAction(params)).rejects.toThrow('Database error');
     });
@@ -134,7 +134,7 @@ describe('AuditLogService', () => {
       const logs = [mockAuditLog];
       const total = 1;
 
-      (repository.findAndCount as jest.Mock).mockResolvedValue([logs, total]);
+      repository.findAndCount.mockResolvedValue([logs, total]);
 
       const result = await service.findLogs();
 
@@ -163,7 +163,7 @@ describe('AuditLogService', () => {
         limit: 25,
       };
 
-      (repository.findAndCount as jest.Mock).mockResolvedValue([[], 0]);
+      repository.findAndCount.mockResolvedValue([[], 0]);
 
       await service.findLogs(filters);
 
@@ -183,7 +183,7 @@ describe('AuditLogService', () => {
 
   describe('getLogById', () => {
     it('returns the matching log', async () => {
-      (repository.findOne as jest.Mock).mockResolvedValue(mockAuditLog);
+      repository.findOne.mockResolvedValue(mockAuditLog);
 
       const result = await service.getLogById('123');
 
@@ -192,7 +192,7 @@ describe('AuditLogService', () => {
     });
 
     it('returns null when the log is not found', async () => {
-      (repository.findOne as jest.Mock).mockResolvedValue(null);
+      repository.findOne.mockResolvedValue(null);
 
       const result = await service.getLogById('nonexistent');
 

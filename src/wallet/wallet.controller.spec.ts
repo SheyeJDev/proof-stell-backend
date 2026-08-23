@@ -33,8 +33,18 @@ describe('WalletController', () => {
       providers: [
         { provide: WalletService, useValue: mockWalletService },
         { provide: JwtService, useValue: { verifyAsync: jest.fn() } },
-        { provide: CacheService, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
-        { provide: TypedConfigService, useValue: { jwtSecret: 'test', jwtIssuer: 'test', jwtAudience: 'test' } },
+        {
+          provide: CacheService,
+          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
+        {
+          provide: TypedConfigService,
+          useValue: {
+            jwtSecret: 'test',
+            jwtIssuer: 'test',
+            jwtAudience: 'test',
+          },
+        },
         { provide: AuditLogInterceptor, useValue: { intercept: jest.fn() } },
         { provide: Reflector, useValue: { getAllAndOverride: jest.fn() } },
       ],
@@ -57,7 +67,10 @@ describe('WalletController', () => {
       { providerName: 'ArgentX' },
       mockReq as any,
     );
-    expect(mockWalletService.connect).toHaveBeenCalledWith('user-123', 'ArgentX');
+    expect(mockWalletService.connect).toHaveBeenCalledWith(
+      'user-123',
+      'ArgentX',
+    );
     expect(result).toEqual({ isConnected: true });
   });
 
@@ -69,9 +82,13 @@ describe('WalletController', () => {
   });
 
   it('getConnectionStatus passes userId to service', () => {
-    mockWalletService.getConnectionStatus.mockReturnValue({ isConnected: true });
+    mockWalletService.getConnectionStatus.mockReturnValue({
+      isConnected: true,
+    });
     const result = controller.getConnectionStatus(mockReq as any);
-    expect(mockWalletService.getConnectionStatus).toHaveBeenCalledWith('user-123');
+    expect(mockWalletService.getConnectionStatus).toHaveBeenCalledWith(
+      'user-123',
+    );
     expect(result.isConnected).toBe(true);
   });
 
@@ -81,7 +98,11 @@ describe('WalletController', () => {
       { providerName: 'ArgentX', message: 'hello', address: '0xABC' },
       mockReq as any,
     );
-    expect(mockWalletService.signMessage).toHaveBeenCalledWith('user-123', 'hello', '0xABC');
+    expect(mockWalletService.signMessage).toHaveBeenCalledWith(
+      'user-123',
+      'hello',
+      '0xABC',
+    );
     expect(result.signature.serialized).toBe('0xsig');
   });
 
@@ -105,8 +126,14 @@ describe('WalletController', () => {
 
   it('switchNetwork passes userId and chainId to service', async () => {
     mockWalletService.switchNetwork.mockResolvedValue(undefined);
-    const result = await controller.switchNetwork({ providerName: 'ArgentX', chainId: '0x89' }, mockReq as any);
-    expect(mockWalletService.switchNetwork).toHaveBeenCalledWith('user-123', '0x89');
+    const result = await controller.switchNetwork(
+      { providerName: 'ArgentX', chainId: '0x89' },
+      mockReq as any,
+    );
+    expect(mockWalletService.switchNetwork).toHaveBeenCalledWith(
+      'user-123',
+      '0x89',
+    );
     expect(result.message).toContain('0x89');
   });
 });

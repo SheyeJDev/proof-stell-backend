@@ -10,7 +10,7 @@ import { Transform } from 'class-transformer';
 
 /**
  * Data transfer object for user login.
- * 
+ *
  * This DTO validates and structures user login requests,
  * ensuring email and password are provided in the correct format.
  */
@@ -18,7 +18,7 @@ export class LoginDto {
   /**
    * The user's email address.
    * Must be a valid email format. Automatically normalized to lowercase and trimmed.
-   * 
+   *
    * @example "user@example.com"
    */
   @ApiProperty({
@@ -35,7 +35,7 @@ export class LoginDto {
   /**
    * The user's password.
    * Must be 8-128 characters long.
-   * 
+   *
    * @example "SecurePass123!"
    */
   @ApiProperty({

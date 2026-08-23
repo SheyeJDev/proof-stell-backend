@@ -16,11 +16,11 @@ import { HashingService } from '../../auth/providers/hashing.service';
 
 /**
  * Service for managing user data and operations.
- * 
+ *
  * This service handles user CRUD operations, password changes, and user statistics.
  * It provides optimized queries to avoid loading unnecessary data and includes
  * conflict detection for email and username uniqueness.
- * 
+ *
  * @example
  * ```typescript
  * const userService = new UserService(userRepository, hashingService);
@@ -35,7 +35,7 @@ import { HashingService } from '../../auth/providers/hashing.service';
 export class UserService {
   /**
    * Creates a new UserService instance.
-   * 
+   *
    * @param userRepository - TypeORM repository for User entity
    * @param hashingService - Service for password hashing operations
    */
@@ -47,10 +47,10 @@ export class UserService {
 
   /**
    * Helper utility method to fetch a complete user record for DTO mapping.
-   * 
+   *
    * This method queries only the fields needed for ReadUserDto to avoid
    * loading large JSON fields or unnecessary relations.
-   * 
+   *
    * @param id - The user ID to query
    * @returns Promise containing the user entity or null if not found
    * @private
@@ -81,14 +81,14 @@ export class UserService {
 
   /**
    * Creates a new user account.
-   * 
+   *
    * This method validates email and username uniqueness, hashes the password,
    * creates the user record, and returns the complete user data.
-   * 
+   *
    * @param createUserDto - The user creation data
    * @returns Promise containing the created user as ReadUserDto
    * @throws {ConflictException} If email or username already exists
-   * 
+   *
    * @example
    * ```typescript
    * const user = await userService.create({
@@ -144,14 +144,14 @@ export class UserService {
 
   /**
    * Retrieves all users with pagination.
-   * 
+   *
    * This method returns a paginated list of users with only summary fields
    * to avoid large payloads. Results are ordered by creation date descending.
-   * 
+   *
    * @param limit - Maximum number of users to return (default: 100)
    * @param offset - Number of users to skip (default: 0)
    * @returns Promise containing array of users as ReadUserDto
-   * 
+   *
    * @example
    * ```typescript
    * const users = await userService.findAll(50, 0);
@@ -181,14 +181,14 @@ export class UserService {
 
   /**
    * Retrieves a specific user by ID.
-   * 
+   *
    * This method returns complete user data including all statistics and
    * profile information for the specified user ID.
-   * 
+   *
    * @param id - The user ID to retrieve
    * @returns Promise containing the user as ReadUserDto
    * @throws {NotFoundException} If user with the specified ID does not exist
-   * 
+   *
    * @example
    * ```typescript
    * const user = await userService.findOne('user-id-here');
@@ -209,13 +209,13 @@ export class UserService {
 
   /**
    * Retrieves a user by email address.
-   * 
+   *
    * This method is optimized for authentication queries, selecting only
    * the fields required for login and password verification.
-   * 
+   *
    * @param email - The email address to search for
    * @returns Promise containing the user entity or null if not found
-   * 
+   *
    * @example
    * ```typescript
    * const user = await userService.findByEmail('user@example.com');
@@ -238,13 +238,13 @@ export class UserService {
 
   /**
    * Retrieves a user by username.
-   * 
+   *
    * This method is optimized for authentication queries, selecting only
    * the fields required for login and password verification.
-   * 
+   *
    * @param username - The username to search for
    * @returns Promise containing the user entity or null if not found
-   * 
+   *
    * @example
    * ```typescript
    * const user = await userService.findByUsername('player1');
@@ -268,13 +268,13 @@ export class UserService {
 
   /**
    * Retrieves a user by email verification token.
-   * 
+   *
    * This method is used during email verification to find the user
    * associated with a verification token and check expiration.
-   * 
+   *
    * @param token - The email verification token
    * @returns Promise containing the user entity or null if not found
-   * 
+   *
    * @example
    * ```typescript
    * const user = await userService.findByVerificationToken('uuid-token-here');
@@ -298,16 +298,16 @@ export class UserService {
 
   /**
    * Updates a user's information.
-   * 
+   *
    * This method updates user data while checking for email/username conflicts.
    * It returns the complete updated user profile.
-   * 
+   *
    * @param id - The user ID to update
    * @param updateUserDto - The user data to update
    * @returns Promise containing the updated user as ReadUserDto
    * @throws {NotFoundException} If user with the specified ID does not exist
    * @throws {ConflictException} If email or username conflicts with another user
-   * 
+   *
    * @example
    * ```typescript
    * const updatedUser = await userService.update('user-id', {
@@ -374,15 +374,15 @@ export class UserService {
 
   /**
    * Changes a user's password.
-   * 
+   *
    * This method verifies the current password before allowing the change,
    * then hashes and stores the new password.
-   * 
+   *
    * @param id - The user ID to update
    * @param changePasswordDto - Object containing current and new passwords
    * @throws {NotFoundException} If user with the specified ID does not exist
    * @throws {UnauthorizedException} If current password is incorrect
-   * 
+   *
    * @example
    * ```typescript
    * await userService.changePassword('user-id', {
@@ -420,13 +420,13 @@ export class UserService {
 
   /**
    * Deletes a user account.
-   * 
+   *
    * This method permanently removes a user from the database.
    * Use with caution as this operation cannot be undone.
-   * 
+   *
    * @param id - The user ID to delete
    * @throws {NotFoundException} If user with the specified ID does not exist
-   * 
+   *
    * @example
    * ```typescript
    * await userService.remove('user-id');
@@ -446,12 +446,12 @@ export class UserService {
 
   /**
    * Updates a user's last login timestamp.
-   * 
+   *
    * This method is called after successful authentication to track
    * when the user last logged in.
-   * 
+   *
    * @param id - The user ID to update
-   * 
+   *
    * @example
    * ```typescript
    * await userService.updateLastLogin('user-id');
@@ -465,14 +465,14 @@ export class UserService {
 
   /**
    * Validates a user's credentials.
-   * 
+   *
    * This method checks if the provided email and password match
    * an existing user account.
-   * 
+   *
    * @param email - The user's email address
    * @param password - The user's plain-text password
    * @returns Promise containing the user entity or null if invalid
-   * 
+   *
    * @example
    * ```typescript
    * const user = await userService.validateUser('user@example.com', 'password123');
@@ -493,15 +493,15 @@ export class UserService {
 
   /**
    * Updates a user's game statistics.
-   * 
+   *
    * This method incrementally updates user statistics including games played,
    * total score, highest score, and streak information. It handles both
    * incremental updates and setting new maximum values.
-   * 
+   *
    * @param userId - The user ID to update
    * @param stats - Object containing the statistics to update
    * @throws {NotFoundException} If user with the specified ID does not exist
-   * 
+   *
    * @example
    * ```typescript
    * await userService.updateUserStats('user-id', {

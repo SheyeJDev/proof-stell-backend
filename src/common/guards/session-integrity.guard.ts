@@ -34,12 +34,10 @@ export class SessionIntegrityGuard implements CanActivate {
     private readonly sessionIntegrityService: SessionIntegrityService,
   ) {}
 
-  async canActivate(
-    context: ExecutionContext,
-  ): Promise<boolean> {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<CustomRequest>();
     const userId = request.user?.id;
-    
+
     // Safe request body handling
     if (!request.body) {
       this.logger.warn('Request body is missing or null', { userId });

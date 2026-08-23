@@ -50,8 +50,17 @@ export default registerAs('app', () => ({
   allowedOrigins: process.env.ALLOWED_ORIGINS || 'http://localhost:3000',
   corsEnabled: process.env.CORS_ENABLED !== 'false',
   // Notification delivery configuration
-  notificationMaxAttempts: parseInt(process.env.NOTIFICATION_MAX_ATTEMPTS || '5', 10),
-  notificationBaseDelayMs: parseInt(process.env.NOTIFICATION_BASE_DELAY_MS || '100', 10),
-  notificationDedupWindowMs: parseInt(process.env.NOTIFICATION_DEDUP_WINDOW_MS || '300000', 10),
+  notificationMaxAttempts: parseInt(
+    process.env.NOTIFICATION_MAX_ATTEMPTS || '5',
+    10,
+  ),
+  notificationBaseDelayMs: parseInt(
+    process.env.NOTIFICATION_BASE_DELAY_MS || '100',
+    10,
+  ),
+  notificationDedupWindowMs: parseInt(
+    process.env.NOTIFICATION_DEDUP_WINDOW_MS || '300000',
+    10,
+  ),
   // Add more config values as needed
 }));

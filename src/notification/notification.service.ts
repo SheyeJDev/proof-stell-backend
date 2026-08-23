@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from './notification.entity';
@@ -43,7 +47,11 @@ export class NotificationService {
           this.loggingService.error(
             'Notification delivery failed after max attempts',
             err instanceof Error ? err : new Error(String(err)),
-            { module: 'notification', action: 'send', userId: notification.userId },
+            {
+              module: 'notification',
+              action: 'send',
+              userId: notification.userId,
+            },
           );
           return;
         }

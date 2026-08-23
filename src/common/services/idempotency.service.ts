@@ -15,7 +15,9 @@ export class IdempotencyService {
   }
 
   async check<T>(key: string): Promise<T | null> {
-    const record = await this.idempotencyKeyRepository.findOne({ where: { key } });
+    const record = await this.idempotencyKeyRepository.findOne({
+      where: { key },
+    });
     if (!record) {
       return null;
     }
@@ -26,7 +28,11 @@ export class IdempotencyService {
     return record.result as T;
   }
 
-  async store(key: string, result: Record<string, any>, ttlMs: number = 3600000): Promise<void> {
+  async store(
+    key: string,
+    result: Record<string, any>,
+    ttlMs: number = 3600000,
+  ): Promise<void> {
     const expiresAt = new Date(Date.now() + ttlMs);
     const record = this.idempotencyKeyRepository.create({
       key,

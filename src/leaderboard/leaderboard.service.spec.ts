@@ -9,7 +9,13 @@ import { TypedConfigService } from '../common/config/typed-config.service';
 import { NotificationService } from '../notification/notification.service';
 import { CacheService } from '../cache/cache.service';
 
-const mockEntry = { id: 1, userId: 'u1', score: 100, rank: 1, updatedAt: new Date() };
+const mockEntry = {
+  id: 1,
+  userId: 'u1',
+  score: 100,
+  rank: 1,
+  updatedAt: new Date(),
+};
 
 const mockQueryRunner = {
   connect: jest.fn(),
@@ -50,7 +56,7 @@ const mockConfigService = {
 
 const mockNotificationService = { create: jest.fn() };
 
-const mockCacheService = { 
+const mockCacheService = {
   del: jest.fn(),
   withLock: jest.fn().mockImplementation((_key, _ttl, callback) => callback()),
 };
@@ -118,9 +124,15 @@ describe('LeaderboardService', () => {
       const existing = { ...mockEntry, score: 50 };
       const qb = mockQueryRunner.manager.createQueryBuilder();
       (qb.getOne as jest.Mock).mockResolvedValue(existing);
-      mockQueryRunner.manager.save.mockResolvedValue({ ...existing, score: 100 });
+      mockQueryRunner.manager.save.mockResolvedValue({
+        ...existing,
+        score: 100,
+      });
       mockQueryRunner.manager.query.mockResolvedValue(undefined);
-      mockQueryRunner.manager.findOneOrFail.mockResolvedValue({ ...mockEntry, rank: 2 });
+      mockQueryRunner.manager.findOneOrFail.mockResolvedValue({
+        ...mockEntry,
+        rank: 2,
+      });
       mockRepository.findAndCount.mockResolvedValue([[mockEntry], 1]);
 
       await service.submitScore('u1', { score: 100 });
@@ -145,7 +157,9 @@ describe('LeaderboardService', () => {
       const qb = mockQueryRunner.manager.createQueryBuilder();
       (qb.getOne as jest.Mock).mockRejectedValue(new Error('DB error'));
 
-      await expect(service.submitScore('u1', { score: 100 })).rejects.toThrow('DB error');
+      await expect(service.submitScore('u1', { score: 100 })).rejects.toThrow(
+        'DB error',
+      );
       expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
       expect(mockQueryRunner.release).toHaveBeenCalled();
     });

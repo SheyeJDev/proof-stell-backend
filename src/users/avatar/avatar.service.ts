@@ -165,7 +165,10 @@ export class AvatarService {
   ): Promise<Metadata> {
     try {
       const metadata = await sharp(buffer, { failOn: 'warning' }).metadata();
-      const actualFormat = (metadata.format as string) === 'jpg' ? 'jpeg' : metadata.format as string;
+      const actualFormat =
+        (metadata.format as string) === 'jpg'
+          ? 'jpeg'
+          : (metadata.format as string);
       if (actualFormat !== expectedFormat) {
         throw new Error('Image signature and decoder format do not match');
       }
