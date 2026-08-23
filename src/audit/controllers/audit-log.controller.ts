@@ -7,12 +7,15 @@ import {
   HttpCode,
   UseGuards,
   Post,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { AuditLogService } from '../services/audit-log.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -40,9 +43,13 @@ export class AuditLogController {
     type: AuditLogsResponseDto,
   })
   @HttpCode(HttpStatus.OK)
-  async getAuditLogs(query: GetAuditLogsDto): Promise<AuditLogsResponseDto> {
+  async getAuditLogs(
+    @Query() query: GetAuditLogsDto,
+  ): Promise<AuditLogsResponseDto> {
     const filters = {
       ...query,
+      page: query.page ?? 1,
+      limit: query.limit ?? 50,
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     };
@@ -78,7 +85,7 @@ export class AuditLogController {
     const log = await this.auditLogService.getLogById(id);
 
     if (!log) {
-      throw new Error('Audit log not found');
+      throw new NotFoundException(`Audit log with id "${id}" not found`);
     }
 
     return log;
@@ -86,6 +93,7 @@ export class AuditLogController {
 
   @Get('user/:userId')
   @ApiOperation({ summary: 'Get audit logs for specific user' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 100 })
   @ApiResponse({
     status: 200,
     description: 'User audit logs retrieved successfully',
@@ -94,13 +102,14 @@ export class AuditLogController {
   @HttpCode(HttpStatus.OK)
   async getUserAuditLogs(
     @Param('userId') userId: string,
-    limit = 100,
+    @Query('limit') limit = 100,
   ): Promise<AuditLogResponseDto[]> {
     return this.auditLogService.getLogsByUser(userId, limit);
   }
 
   @Get('action/:actionType')
   @ApiOperation({ summary: 'Get audit logs by action type' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 100 })
   @ApiResponse({
     status: 200,
     description: 'Action audit logs retrieved successfully',
@@ -109,7 +118,7 @@ export class AuditLogController {
   @HttpCode(HttpStatus.OK)
   async getActionAuditLogs(
     @Param('actionType') actionType: string,
-    limit = 100,
+    @Query('limit') limit = 100,
   ): Promise<AuditLogResponseDto[]> {
     return this.auditLogService.getLogsByActionType(actionType, limit);
   }
@@ -140,11 +149,15 @@ export class AuditLogController {
     status: 200,
     description: 'Audit logs archived successfully',
   })
+  @ApiResponse({
+    status: 400,
+    description: 'Retention days must be at least 30',
+  })
   @HttpCode(HttpStatus.OK)
   async archiveAuditLogs(@Query('days') days: string = '365') {
     const retentionDays = parseInt(days, 10);
     if (isNaN(retentionDays) || retentionDays < 30) {
-      throw new Error('Retention days must be at least 30');
+      throw new BadRequestException('Retention days must be at least 30');
     }
     const deletedCount =
       await this.auditLogService.archiveOldLogs(retentionDays);

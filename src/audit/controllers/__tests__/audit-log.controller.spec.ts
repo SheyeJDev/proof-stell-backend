@@ -55,9 +55,7 @@ describe('AuditLogController', () => {
     controller = module.get<AuditLogController>(AuditLogController);
     // Pull the mock straight back through NestJS — it's the same object
     // instance since `useValue` is a singleton-per-test.
-    const mockAuditLogService = module.get(
-      AuditLogService,
-    ) as any as typeof service;
+    const mockAuditLogService: typeof service = module.get(AuditLogService);
     service = mockAuditLogService;
   });
 
