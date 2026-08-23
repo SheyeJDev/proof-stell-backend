@@ -81,7 +81,7 @@ describe('AuditLogController', () => {
         totalPages: 1,
       };
 
-      (service.findLogs as jest.Mock<any>).mockResolvedValue(expectedResponse);
+      service.findLogs.mockResolvedValue(expectedResponse);
 
       const result = await controller.getAuditLogs(query);
 
@@ -102,7 +102,7 @@ describe('AuditLogController', () => {
         endDate: '2024-01-02T00:00:00Z',
       };
 
-      (service.findLogs as jest.Mock<any>).mockResolvedValue({
+      service.findLogs.mockResolvedValue({
         logs: [],
         total: 0,
         page: 1,
@@ -132,7 +132,7 @@ describe('AuditLogController', () => {
         recentActivity: 10,
       };
 
-      (service.getLogStats as jest.Mock<any>).mockResolvedValue(expectedStats);
+      service.getLogStats.mockResolvedValue(expectedStats);
 
       const result = await controller.getAuditLogStats();
 
@@ -143,7 +143,7 @@ describe('AuditLogController', () => {
 
   describe('getAuditLogById', () => {
     it('returns a specific audit log', async () => {
-      (service.getLogById as jest.Mock<any>).mockResolvedValue(mockAuditLog);
+      service.getLogById.mockResolvedValue(mockAuditLog);
 
       const result = await controller.getAuditLogById('123');
 
@@ -152,7 +152,7 @@ describe('AuditLogController', () => {
     });
 
     it('throws NotFoundException when the log is not found', async () => {
-      (service.getLogById as jest.Mock<any>).mockResolvedValue(null);
+      service.getLogById.mockResolvedValue(null);
 
       await expect(controller.getAuditLogById('nonexistent')).rejects.toThrow(
         NotFoundException,
@@ -165,9 +165,7 @@ describe('AuditLogController', () => {
 
   describe('getUserAuditLogs', () => {
     it('returns logs for a specific user', async () => {
-      (service.getLogsByUser as jest.Mock<any>).mockResolvedValue([
-        mockAuditLog,
-      ]);
+      service.getLogsByUser.mockResolvedValue([mockAuditLog]);
 
       const result = await controller.getUserAuditLogs('user-123');
 
@@ -176,7 +174,7 @@ describe('AuditLogController', () => {
     });
 
     it('respects limit parameter', async () => {
-      (service.getLogsByUser as jest.Mock<any>).mockResolvedValue([]);
+      service.getLogsByUser.mockResolvedValue([]);
 
       await controller.getUserAuditLogs('user-123', 50);
 
@@ -186,9 +184,7 @@ describe('AuditLogController', () => {
 
   describe('getActionAuditLogs', () => {
     it('returns logs for a specific action type', async () => {
-      (service.getLogsByActionType as jest.Mock<any>).mockResolvedValue([
-        mockAuditLog,
-      ]);
+      service.getLogsByActionType.mockResolvedValue([mockAuditLog]);
 
       const result = await controller.getActionAuditLogs('USER_LOGIN');
 
@@ -200,7 +196,7 @@ describe('AuditLogController', () => {
     });
 
     it('respects limit parameter', async () => {
-      (service.getLogsByActionType as jest.Mock<any>).mockResolvedValue([]);
+      service.getLogsByActionType.mockResolvedValue([]);
 
       await controller.getActionAuditLogs('USER_LOGIN', 50);
 
@@ -213,7 +209,7 @@ describe('AuditLogController', () => {
 
   describe('archiveAuditLogs', () => {
     it('archives logs with a valid retention period', async () => {
-      (service.archiveOldLogs as jest.Mock<any>).mockResolvedValue(42);
+      service.archiveOldLogs.mockResolvedValue(42);
 
       const result = await controller.archiveAuditLogs('90');
 
@@ -225,7 +221,7 @@ describe('AuditLogController', () => {
     });
 
     it('defaults to 365 days when no query param is given', async () => {
-      (service.archiveOldLogs as jest.Mock<any>).mockResolvedValue(0);
+      service.archiveOldLogs.mockResolvedValue(0);
 
       await controller.archiveAuditLogs(undefined as unknown as string);
 
