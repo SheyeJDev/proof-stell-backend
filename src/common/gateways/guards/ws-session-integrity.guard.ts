@@ -47,10 +47,8 @@ export class WsSessionIntegrityGuard implements CanActivate {
     }
 
     // Session timing validation
-    const timingResult = this.sessionIntegrityService.validateSessionTiming(
-      sessionData,
-      userId,
-    );
+    const timingResult =
+      this.sessionIntegrityService.validateSessionTiming(sessionData);
     if (!timingResult.isValid) {
       this.logger.warn('Session timing validation failed', {
         userId,
@@ -66,7 +64,6 @@ export class WsSessionIntegrityGuard implements CanActivate {
     // Input sequence validation
     const sequenceResult = this.sessionIntegrityService.validateInputSequence(
       sessionData.inputs,
-      userId,
     );
     if (!sequenceResult.isValid) {
       this.logger.warn('Input sequence validation failed', {

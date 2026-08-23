@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Observable } from 'rxjs';
-import { EMPTY, from, throwError, timer } from 'rxjs';
+import { EMPTY, from, throwError } from 'rxjs';
 import { catchError, switchMap, tap, timeout } from 'rxjs/operators';
 import type { Request } from 'express';
 import { AuditLogService } from '../services/audit-log.service';
